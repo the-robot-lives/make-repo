@@ -301,78 +301,76 @@ fi
 command -v gh >/dev/null 2>&1 || die "gh CLI not found — install with: brew install gh"
 gh auth status >/dev/null 2>&1 || die "Not authenticated — run: gh auth login"
 
-# --- Edit mode: modify an existing repo -------------------------------------
-if [[ "$edit_mode" == true ]]; then
-  if ! gh repo view "$full_name" >/dev/null 2>&1; then
-    die "Repo ${full_name} does not exist — nothing to edit."
-  fi
+# --- Edit mode helper --------------------------------------------------------
+edit_existing() {
+  while true; do
+    banner "Edit Repo"
+    echo ""
+    echo -e "  ${BOLD}Editing:${NC} ${CYN}${full_name}${NC}"
+    echo ""
+    echo -e "  ${BOLD}[1]${NC} Visibility:  ${CYN}${visibility}${NC} (current: ${current_vis,,})"
+    echo -e "  ${BOLD}[2]${NC} Description: ${CYN}${description}${NC}"
+    if [[ -n "$groups" ]]; then
+      echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}${groups}${NC} (role: ${group_role})"
+    else
+      echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}(none — add teams)${NC}"
+    fi
+    echo ""
+    echo -e "  ${BOLD}[y]${NC} Apply changes"
+    echo -e "  ${BOLD}[n]${NC} Abort"
+    echo -e "  ${BOLD}[1-3]${NC} Edit a field"
+    echo ""
+    read -rp "  > " choice
 
-  current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
-  current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
+    case "$choice" in
+      y|Y|yes) return 0 ;;
+      n|N|no|q) warn "Aborted."; exit 1 ;;
+      1)
+        if [[ "$visibility" == "private" ]]; then
+          visibility="public"
+        else
+          visibility="private"
+        fi
+        ok "Toggled to ${visibility}"
+        ;;
+      2)
+        read -rp "  Description [${description}]: " new_val
+        [[ -n "$new_val" ]] && description="$new_val"
+        ;;
+      3)
+        read -rp "  Groups (comma-separated, :role suffix) [${groups}]: " new_val
+        [[ -n "$new_val" ]] && groups="$new_val"
+        if [[ -n "$groups" ]]; then
+          read -rp "  Default role [${group_role}]: " new_role
+          [[ -n "$new_role" ]] && group_role="$new_role"
+        fi
+        ;;
+      *) warn "Invalid choice: ${choice}" ;;
+    esac
+  done
+}
 
-  # Apply CLI overrides if provided, otherwise keep current values
-  [[ -z "$cli_visibility" ]] && visibility="${current_vis,,}"
-  [[ -z "$cli_description" ]] && description="${current_desc}"
-
-  edit_existing() {
-    while true; do
-      banner "make-repo --edit"
-      echo ""
-      echo -e "  ${BOLD}Editing:${NC} ${CYN}${full_name}${NC}"
-      echo ""
-      echo -e "  ${BOLD}[1]${NC} Visibility:  ${CYN}${visibility}${NC} (current: ${current_vis,,})"
-      echo -e "  ${BOLD}[2]${NC} Description: ${CYN}${description}${NC}"
-      if [[ -n "$groups" ]]; then
-        echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}${groups}${NC} (role: ${group_role})"
-      else
-        echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}(none — add teams)${NC}"
-      fi
-      echo ""
-      echo -e "  ${BOLD}[y]${NC} Apply changes"
-      echo -e "  ${BOLD}[n]${NC} Abort"
-      echo -e "  ${BOLD}[1-3]${NC} Edit a field"
-      echo ""
-      read -rp "  > " choice
-
-      case "$choice" in
-        y|Y|yes) return 0 ;;
-        n|N|no|q) warn "Aborted."; exit 1 ;;
-        1)
-          if [[ "$visibility" == "private" ]]; then
-            visibility="public"
-          else
-            visibility="private"
-          fi
-          ok "Toggled to ${visibility}"
-          ;;
-        2)
-          read -rp "  Description [${description}]: " new_val
-          [[ -n "$new_val" ]] && description="$new_val"
-          ;;
-        3)
-          read -rp "  Groups (comma-separated, :role suffix) [${groups}]: " new_val
-          [[ -n "$new_val" ]] && groups="$new_val"
-          if [[ -n "$groups" ]]; then
-            read -rp "  Default role [${group_role}]: " new_role
-            [[ -n "$new_role" ]] && group_role="$new_role"
-          fi
-          ;;
-        *) warn "Invalid choice: ${choice}" ;;
-      esac
-    done
-  }
-
-  if [[ "$auto_confirm" == false ]]; then
-    edit_existing
-  fi
-
+apply_edits() {
+  banner "Edit Repo"
+  echo -e "  ${BOLD}Repo:${NC} ${CYN}${full_name}${NC}"
   changes_made=false
 
   if [[ "${visibility}" != "${current_vis,,}" ]]; then
-    step "Updating visibility → ${visibility}"
-    gh repo edit "$full_name" --visibility "$visibility"
-    ok "Visibility set to ${visibility}"
-    changes_made=true
+    warn "Visibility change: ${current_vis,,} → ${visibility}"
+    if [[ "$auto_confirm" == false ]]; then
+      read -rp "  Are you sure? [y/N] " confirm_vis
+      if [[ ! "$confirm_vis" =~ ^[yY](es)?$ ]]; then
+        info "Visibility change skipped."
+      else
+        gh repo edit "$full_name" --visibility "$visibility" --accept-visibility-change-consequences
+        ok "Visibility set to ${visibility}"
+        changes_made=true
+      fi
+    else
+      gh repo edit "$full_name" --visibility "$visibility" --accept-visibility-change-consequences
+      ok "Visibility set to ${visibility}"
+      changes_made=true
+    fi
   fi
 
   if [[ "${description}" != "${current_desc}" ]]; then
@@ -423,16 +421,75 @@ if [[ "$edit_mode" == true ]]; then
   fi
   info "URL: https://github.com/${full_name}"
   exit 0
+}
+
+# --- Submodule self-detection: use the submodule's own remote ----------------
+# When pwd is a submodule (.git is a file), it has its own origin remote.
+# If no CLI overrides were given for org/repo, prefer the submodule's remote
+# over what parent detection inferred.
+if [[ -f .git && -z "$cli_org" && -z "$cli_repo_name" ]]; then
+  _sub_remote="$(git remote get-url origin 2>/dev/null || true)"
+  if [[ -n "$_sub_remote" ]]; then
+    _sub_org=""
+    _sub_repo=""
+    case "$_sub_remote" in
+      git@github.com:*)
+        _sub_org="$(echo "$_sub_remote" | sed 's|git@github.com:||;s|/.*||')"
+        _sub_repo="$(echo "$_sub_remote" | sed 's|git@github.com:[^/]*/||;s|\.git$||')"
+        ;;
+      *github.com/*)
+        _sub_org="$(echo "$_sub_remote" | sed 's|.*github.com/||;s|/.*||')"
+        _sub_repo="$(echo "$_sub_remote" | sed 's|.*github.com/[^/]*/||;s|\.git$||')"
+        ;;
+    esac
+    if [[ -n "$_sub_org" && -n "$_sub_repo" ]]; then
+      org="$_sub_org"
+      repo_name="$_sub_repo"
+      full_name="${org}/${repo_name}"
+    fi
+    unset _sub_remote _sub_org _sub_repo
+  fi
 fi
 
-if gh repo view "$full_name" >/dev/null 2>&1; then
-  die "Repo ${full_name} already exists on GitHub."
+# --- Auto-enter edit mode for existing repos when visibility flag is set -----
+if [[ "$edit_mode" == false ]] && gh repo view "$full_name" >/dev/null 2>&1; then
+  if [[ -n "$cli_visibility" ]]; then
+    edit_mode=true
+  else
+    die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it."
+  fi
+fi
+
+# --- Edit mode: modify an existing repo -------------------------------------
+if [[ "$edit_mode" == true ]]; then
+  if ! gh repo view "$full_name" >/dev/null 2>&1; then
+    die "Repo ${full_name} does not exist — nothing to edit."
+  fi
+
+  current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
+  current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
+
+  [[ -z "$cli_visibility" ]] && visibility="${current_vis,,}"
+  [[ -z "$cli_description" ]] && description="${current_desc}"
+
+  if [[ "$auto_confirm" == false && -z "$cli_visibility" ]]; then
+    edit_existing
+  fi
+
+  apply_edits
 fi
 
 # --- Confirmation prompt -----------------------------------------------------
 confirm_and_edit() {
+  local repo_exists=false
+  gh repo view "${org}/${repo_name}" >/dev/null 2>&1 && repo_exists=true
+
   while true; do
-    banner "make-repo"
+    if [[ "$repo_exists" == true ]]; then
+      banner "Edit Repo"
+    else
+      banner "Create Repo"
+    fi
     echo ""
     echo -e "  ${BOLD}[1]${NC} Org:         ${CYN}${org}${NC}"
     echo -e "  ${BOLD}[2]${NC} Repo:        ${CYN}${repo_name}${NC}"
@@ -448,7 +505,11 @@ confirm_and_edit() {
       echo -e "  ${CYN}    Inherited:  org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)${NC}"
     fi
     echo ""
-    echo -e "  ${BOLD}[y]${NC} Confirm and create"
+    if [[ "$repo_exists" == true ]]; then
+      echo -e "  ${BOLD}[y]${NC} Apply changes"
+    else
+      echo -e "  ${BOLD}[y]${NC} Confirm and create"
+    fi
     echo -e "  ${BOLD}[n]${NC} Abort"
     echo -e "  ${BOLD}[1-6]${NC} Edit a field"
     echo ""
@@ -465,10 +526,14 @@ confirm_and_edit() {
       1)
         read -rp "  Org [${org}]: " new_val
         [[ -n "$new_val" ]] && org="$new_val"
+        repo_exists=false
+        gh repo view "${org}/${repo_name}" >/dev/null 2>&1 && repo_exists=true
         ;;
       2)
         read -rp "  Repo name [${repo_name}]: " new_val
         [[ -n "$new_val" ]] && repo_name="$new_val"
+        repo_exists=false
+        gh repo view "${org}/${repo_name}" >/dev/null 2>&1 && repo_exists=true
         ;;
       3)
         info "Edit org [1] or repo name [2] individually."
@@ -501,7 +566,11 @@ confirm_and_edit() {
 }
 
 if [[ "$dry_run" == true ]]; then
-  banner "make-repo (dry run)"
+  if [[ "$edit_mode" == true ]]; then
+    banner "Edit Repo (dry run)"
+  else
+    banner "Create Repo (dry run)"
+  fi
   info "Org:         ${org}"
   info "Repo:        ${repo_name}"
   info "Full name:   ${full_name}"
@@ -520,9 +589,15 @@ if [[ "$auto_confirm" == false ]]; then
 fi
 full_name="${org}/${repo_name}"
 
-# Re-check after edits
+# Re-check after edits — auto-enter edit mode if visibility was explicitly set
 if gh repo view "$full_name" >/dev/null 2>&1; then
-  die "Repo ${full_name} already exists on GitHub."
+  if [[ -n "$cli_visibility" ]]; then
+    current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
+    current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
+    [[ -z "$cli_description" ]] && description="${current_desc}"
+    apply_edits
+  fi
+  die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it."
 fi
 
 # --- Init local git if needed ------------------------------------------------
