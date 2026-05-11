@@ -25,6 +25,8 @@ set -euo pipefail
 #   make-repo --description "My project"   # set repo description
 #   make-repo --groups "team-a,team-b:admin,team-c"  # grant team access
 #   make-repo --yes                        # skip confirmation prompt
+#   make-repo --edit                       # edit existing repo settings
+#   make-repo --edit --public              # make existing repo public
 #   make-repo --dry-run                    # show what would happen
 #
 # Environment (base):
@@ -70,6 +72,7 @@ dry_run=false
 no_prefix=false
 no_inherit=false
 auto_confirm=false
+edit_mode=false
 
 args=("$@")
 set -- "${args[@]}"
@@ -86,6 +89,7 @@ while [[ $# -gt 0 ]]; do
     --groups)      cli_groups="$2"; shift 2 ;;
     --group-role)  cli_group_role="$2"; shift 2 ;;
     --yes|-y)      auto_confirm=true; shift ;;
+    --edit)        edit_mode=true; shift ;;
     --dry-run)     dry_run=true; shift ;;
     --help|-h)     head -47 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
     *)             die "Unknown flag: $1 (try --help)" ;;
@@ -296,6 +300,130 @@ fi
 # --- Preflight checks --------------------------------------------------------
 command -v gh >/dev/null 2>&1 || die "gh CLI not found — install with: brew install gh"
 gh auth status >/dev/null 2>&1 || die "Not authenticated — run: gh auth login"
+
+# --- Edit mode: modify an existing repo -------------------------------------
+if [[ "$edit_mode" == true ]]; then
+  if ! gh repo view "$full_name" >/dev/null 2>&1; then
+    die "Repo ${full_name} does not exist — nothing to edit."
+  fi
+
+  current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
+  current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
+
+  # Apply CLI overrides if provided, otherwise keep current values
+  [[ -z "$cli_visibility" ]] && visibility="${current_vis,,}"
+  [[ -z "$cli_description" ]] && description="${current_desc}"
+
+  edit_existing() {
+    while true; do
+      banner "make-repo --edit"
+      echo ""
+      echo -e "  ${BOLD}Editing:${NC} ${CYN}${full_name}${NC}"
+      echo ""
+      echo -e "  ${BOLD}[1]${NC} Visibility:  ${CYN}${visibility}${NC} (current: ${current_vis,,})"
+      echo -e "  ${BOLD}[2]${NC} Description: ${CYN}${description}${NC}"
+      if [[ -n "$groups" ]]; then
+        echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}${groups}${NC} (role: ${group_role})"
+      else
+        echo -e "  ${BOLD}[3]${NC} Groups:      ${CYN}(none — add teams)${NC}"
+      fi
+      echo ""
+      echo -e "  ${BOLD}[y]${NC} Apply changes"
+      echo -e "  ${BOLD}[n]${NC} Abort"
+      echo -e "  ${BOLD}[1-3]${NC} Edit a field"
+      echo ""
+      read -rp "  > " choice
+
+      case "$choice" in
+        y|Y|yes) return 0 ;;
+        n|N|no|q) warn "Aborted."; exit 1 ;;
+        1)
+          if [[ "$visibility" == "private" ]]; then
+            visibility="public"
+          else
+            visibility="private"
+          fi
+          ok "Toggled to ${visibility}"
+          ;;
+        2)
+          read -rp "  Description [${description}]: " new_val
+          [[ -n "$new_val" ]] && description="$new_val"
+          ;;
+        3)
+          read -rp "  Groups (comma-separated, :role suffix) [${groups}]: " new_val
+          [[ -n "$new_val" ]] && groups="$new_val"
+          if [[ -n "$groups" ]]; then
+            read -rp "  Default role [${group_role}]: " new_role
+            [[ -n "$new_role" ]] && group_role="$new_role"
+          fi
+          ;;
+        *) warn "Invalid choice: ${choice}" ;;
+      esac
+    done
+  }
+
+  if [[ "$auto_confirm" == false ]]; then
+    edit_existing
+  fi
+
+  changes_made=false
+
+  if [[ "${visibility}" != "${current_vis,,}" ]]; then
+    step "Updating visibility → ${visibility}"
+    gh repo edit "$full_name" --visibility "$visibility"
+    ok "Visibility set to ${visibility}"
+    changes_made=true
+  fi
+
+  if [[ "${description}" != "${current_desc}" ]]; then
+    step "Updating description"
+    gh repo edit "$full_name" --description "$description"
+    ok "Description updated"
+    changes_made=true
+  fi
+
+  if [[ -n "$groups" ]]; then
+    step "Updating team access"
+    IFS=',' read -ra team_entries <<< "$groups"
+    for entry in "${team_entries[@]}"; do
+      entry="$(echo "$entry" | xargs)"
+      if [[ "$entry" == *:* ]]; then
+        team="${entry%%:*}"
+        role="${entry#*:}"
+      else
+        team="$entry"
+        role="$group_role"
+      fi
+
+      valid_roles="pull push admin maintain triage"
+      if [[ ! " $valid_roles " =~ " $role " ]]; then
+        warn "Invalid role '${role}' for team '${team}' — skipping (valid: ${valid_roles})"
+        continue
+      fi
+
+      info "  ${team} → ${role}"
+      if gh api \
+        --method PUT \
+        -H "Accept: application/vnd.github+json" \
+        "/orgs/${org}/teams/${team}/repos/${full_name}" \
+        -f "permission=${role}" >/dev/null 2>&1; then
+        ok "  ${team}: ${role}"
+        changes_made=true
+      else
+        fail "  Failed to set ${role} for team ${team}"
+      fi
+    done
+  fi
+
+  if [[ "$changes_made" == false ]]; then
+    info "No changes to apply."
+  else
+    echo ""
+    ok "Done! ${full_name}"
+  fi
+  info "URL: https://github.com/${full_name}"
+  exit 0
+fi
 
 if gh repo view "$full_name" >/dev/null 2>&1; then
   die "Repo ${full_name} already exists on GitHub."

@@ -70,6 +70,7 @@ When run inside a subdirectory of an existing GitHub repo (or a submodule), `mak
 | `--groups LIST` | Comma-separated teams, optional `:role` suffix |
 | `--group-role ROLE` | Default team role (default: `push`) |
 | `--yes`, `-y` | Skip confirmation prompt |
+| `--edit` | Edit an existing repo (visibility, description, teams) |
 | `--dry-run` | Show resolved values without creating anything |
 | `--help`, `-h` | Show usage |
 
@@ -122,7 +123,40 @@ make-repo --dry-run
 # Inside a submodule — inherits parent org + visibility
 cd projects/cool-submodule
 make-repo    # org and visibility from parent
+
+# Edit an existing repo — interactive menu
+make-repo --edit
+
+# Edit with flags (no prompt)
+make-repo --edit --public --description "Updated desc" --yes
+
+# Add team access to existing repo
+make-repo --edit --groups "devs,ops:admin" --yes
 ```
+
+## Editing Existing Repos
+
+`--edit` mode lets you modify an existing repo's visibility, description, and team access. It fetches the current settings from GitHub and presents an interactive menu:
+
+```
+═══════════════════════════════════════════════
+  make-repo --edit
+═══════════════════════════════════════════════
+
+  Editing: noizu/my-cool-thing
+
+  [1] Visibility:  private (current: private)
+  [2] Description: My cool thing
+  [3] Groups:      (none — add teams)
+
+  [y] Apply changes
+  [n] Abort
+  [1-3] Edit a field
+
+  >
+```
+
+Only changed fields are updated. Combine with `--yes` and flags to script edits without prompts.
 
 ## Prerequisites
 
