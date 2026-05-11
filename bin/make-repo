@@ -1,0 +1,384 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# =============================================================================
+# make-repo — Create a GitHub repo and push the current directory.
+#
+# Defaults: org=noizu, repo name=current folder basename, private visibility.
+# When run inside an existing GitHub repo (or submodule), inherits the parent
+# repo's org and visibility unless overridden.
+#
+# Precedence (highest wins):
+#   1. CLI flags          (--org, --public, etc.)
+#   2. _OVERRIDE env vars (GH_NEW_REPO_ORG_OVERRIDE, etc.)
+#   3. Parent repo        (detected from nearest GitHub remote)
+#   4. Base env vars      (GH_NEW_REPO_ORG, etc.)
+#   5. Built-in defaults  (org=noizu, private)
+#
+# Usage:
+#   make-repo                              # noizu/<current-folder>, private
+#   make-repo --org my-org                 # my-org/<current-folder>
+#   make-repo --repo cool-thing            # noizu/<prefix>-cool-thing
+#   make-repo --public                     # public repo
+#   make-repo --prefix libs                # noizu/libs-<folder>
+#   make-repo --no-prefix                  # ignore GH_NEW_REPO_PREFIX
+#   make-repo --no-inherit                 # skip parent repo detection
+#   make-repo --description "My project"   # set repo description
+#   make-repo --groups "team-a,team-b:admin,team-c"  # grant team access
+#   make-repo --dry-run                    # show what would happen
+#
+# Environment (base):
+#   GH_NEW_REPO_ORG        — default org (default: noizu)
+#   GH_NEW_REPO_PREFIX     — prefix prepended to repo name
+#   GH_NEW_REPO_NAME       — override repo name (prefix still applied)
+#   GH_NEW_REPO_DESC       — repo description
+#   GH_NEW_REPO_PUBLIC     — set to any value for public visibility
+#   GH_NEW_REPO_GROUPS     — comma-separated teams, optional :role suffix
+#   GH_NEW_REPO_GROUP_ROLE — default role for teams (default: push)
+#
+# Environment (overrides — beat parent detection):
+#   GH_NEW_REPO_ORG_OVERRIDE    — force org even inside a parent repo
+#   GH_NEW_REPO_PREFIX_OVERRIDE — force prefix
+#   GH_NEW_REPO_NAME_OVERRIDE   — force repo name
+#   GH_NEW_REPO_DESC_OVERRIDE   — force description
+#   GH_NEW_REPO_PUBLIC_OVERRIDE — force public (set to 1) or private (set to 0)
+#   GH_NEW_REPO_GROUPS_OVERRIDE — force team list
+# =============================================================================
+
+# --- Colours -----------------------------------------------------------------
+RED=$'\033[0;31m'; YEL=$'\033[1;33m'; GRN=$'\033[0;32m'
+BLU=$'\033[0;34m'; CYN=$'\033[0;36m'; NC=$'\033[0m'
+BOLD=$'\033[1m'
+
+banner()  { echo -e "\n${BLU}${BOLD}═══════════════════════════════════════════════${NC}"; echo -e "${BLU}${BOLD}  $1${NC}"; echo -e "${BLU}${BOLD}═══════════════════════════════════════════════${NC}"; }
+step()    { echo -e "\n${BLU}▶ $1${NC}"; }
+ok()      { echo -e "  ${GRN}✅ $1${NC}"; }
+warn()    { echo -e "  ${YEL}⚠️  $1${NC}"; }
+fail()    { echo -e "  ${RED}❌ $1${NC}"; }
+info()    { echo -e "  ${CYN}ℹ️  $1${NC}"; }
+die()     { echo -e "\n${RED}❌ $1${NC}\n"; exit 1; }
+
+# --- Parse CLI flags (first pass — collect explicit overrides) ---------------
+cli_org=""
+cli_prefix=""
+cli_repo_name=""
+cli_description=""
+cli_visibility=""
+cli_groups=""
+cli_group_role=""
+dry_run=false
+no_prefix=false
+no_inherit=false
+
+args=("$@")
+set -- "${args[@]}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --org)         cli_org="$2"; shift 2 ;;
+    --prefix)      cli_prefix="$2"; shift 2 ;;
+    --no-prefix)   no_prefix=true; shift ;;
+    --no-inherit)  no_inherit=true; shift ;;
+    --repo)        cli_repo_name="$2"; shift 2 ;;
+    --description) cli_description="$2"; shift 2 ;;
+    --public)      cli_visibility="public"; shift ;;
+    --private)     cli_visibility="private"; shift ;;
+    --groups)      cli_groups="$2"; shift 2 ;;
+    --group-role)  cli_group_role="$2"; shift 2 ;;
+    --dry-run)     dry_run=true; shift ;;
+    --help|-h)     head -45 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
+    *)             die "Unknown flag: $1 (try --help)" ;;
+  esac
+done
+
+# --- Parent repo detection ---------------------------------------------------
+parent_org=""
+parent_visibility=""
+parent_detected=false
+
+detect_parent_repo() {
+  local dir="$PWD"
+  local git_root=""
+
+  # Walk up to find a .git that isn't ours (or is ours if we're not yet a repo)
+  # For submodules, .git is a file pointing to the parent's .git/modules/
+  if [[ -f .git ]]; then
+    # We're a submodule — the parent is one level up from the gitdir target
+    local gitdir
+    gitdir="$(sed -n 's/^gitdir: //p' .git)"
+    if [[ -n "$gitdir" ]]; then
+      # Resolve to absolute path
+      local abs_gitdir
+      abs_gitdir="$(cd "$(dirname "$gitdir")" && pwd)/$(basename "$gitdir")"
+      # The parent repo's .git is typically at .git/modules/../../.git
+      # Walk up from gitdir to find the parent working tree
+      local parent_dir="$abs_gitdir"
+      while [[ "$parent_dir" != "/" ]]; do
+        parent_dir="$(dirname "$parent_dir")"
+        if [[ -d "${parent_dir}/.git" ]]; then
+          git_root="$parent_dir"
+          break
+        fi
+      done
+    fi
+  elif [[ -d .git ]]; then
+    # We're inside a regular git repo — check if pwd is a subdirectory
+    # that the user wants to split into its own repo
+    git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    # If git root IS our pwd, there's no parent to inherit from
+    if [[ "$git_root" == "$PWD" ]]; then
+      git_root=""
+    fi
+  else
+    # No .git at all — walk up looking for a containing repo
+    local check_dir="$PWD"
+    while [[ "$check_dir" != "/" ]]; do
+      check_dir="$(dirname "$check_dir")"
+      if [[ -d "${check_dir}/.git" || -f "${check_dir}/.git" ]]; then
+        git_root="$check_dir"
+        break
+      fi
+    done
+  fi
+
+  [[ -z "$git_root" ]] && return 1
+
+  # Extract GitHub remote from parent
+  local remote_url
+  remote_url="$(git -C "$git_root" remote get-url origin 2>/dev/null || true)"
+  [[ -z "$remote_url" ]] && return 1
+
+  # Parse org from remote URL (handles SSH and HTTPS)
+  # git@github.com:org/repo.git  →  org
+  # https://github.com/org/repo  →  org
+  local parsed_org=""
+  case "$remote_url" in
+    git@github.com:*)
+      parsed_org="$(echo "$remote_url" | sed 's|git@github.com:||;s|/.*||')"
+      ;;
+    *github.com/*)
+      parsed_org="$(echo "$remote_url" | sed 's|.*github.com/||;s|/.*||')"
+      ;;
+  esac
+  [[ -z "$parsed_org" ]] && return 1
+
+  parent_org="$parsed_org"
+
+  # Query parent repo visibility via gh
+  local parent_repo_name
+  parent_repo_name="$(echo "$remote_url" | sed 's|.*github.com[:/]||;s|\.git$||')"
+  local vis
+  vis="$(gh repo view "$parent_repo_name" --json visibility -q '.visibility' 2>/dev/null || true)"
+  case "${vis,,}" in
+    public)  parent_visibility="public" ;;
+    private) parent_visibility="private" ;;
+    *)       parent_visibility="" ;;
+  esac
+
+  parent_detected=true
+  return 0
+}
+
+if [[ "$no_inherit" == false ]]; then
+  detect_parent_repo || true
+fi
+
+# --- Resolve final values (precedence: CLI > _OVERRIDE > parent > base env) --
+resolve() {
+  local cli_val="$1"
+  local override_val="$2"
+  local parent_val="$3"
+  local base_val="$4"
+  local default_val="$5"
+
+  if [[ -n "$cli_val" ]]; then echo "$cli_val"
+  elif [[ -n "$override_val" ]]; then echo "$override_val"
+  elif [[ -n "$parent_val" ]]; then echo "$parent_val"
+  elif [[ -n "$base_val" ]]; then echo "$base_val"
+  else echo "$default_val"
+  fi
+}
+
+org="$(resolve \
+  "$cli_org" \
+  "${GH_NEW_REPO_ORG_OVERRIDE:-}" \
+  "$parent_org" \
+  "${GH_NEW_REPO_ORG:-}" \
+  "noizu")"
+
+prefix="$(resolve \
+  "$cli_prefix" \
+  "${GH_NEW_REPO_PREFIX_OVERRIDE:-}" \
+  "" \
+  "${GH_NEW_REPO_PREFIX:-}" \
+  "")"
+
+repo_name="$(resolve \
+  "$cli_repo_name" \
+  "${GH_NEW_REPO_NAME_OVERRIDE:-}" \
+  "" \
+  "${GH_NEW_REPO_NAME:-}" \
+  "")"
+
+description="$(resolve \
+  "$cli_description" \
+  "${GH_NEW_REPO_DESC_OVERRIDE:-}" \
+  "" \
+  "${GH_NEW_REPO_DESC:-}" \
+  "")"
+
+groups="$(resolve \
+  "$cli_groups" \
+  "${GH_NEW_REPO_GROUPS_OVERRIDE:-}" \
+  "" \
+  "${GH_NEW_REPO_GROUPS:-}" \
+  "")"
+
+group_role="$(resolve \
+  "$cli_group_role" \
+  "" \
+  "" \
+  "${GH_NEW_REPO_GROUP_ROLE:-}" \
+  "push")"
+
+# Visibility needs special handling: _OVERRIDE uses 1/0
+resolve_visibility() {
+  if [[ -n "$cli_visibility" ]]; then
+    echo "$cli_visibility"
+    return
+  fi
+
+  local ov="${GH_NEW_REPO_PUBLIC_OVERRIDE:-}"
+  if [[ -n "$ov" ]]; then
+    [[ "$ov" == "1" ]] && echo "public" || echo "private"
+    return
+  fi
+
+  if [[ -n "$parent_visibility" ]]; then
+    echo "$parent_visibility"
+    return
+  fi
+
+  if [[ -n "${GH_NEW_REPO_PUBLIC:-}" ]]; then
+    echo "public"
+    return
+  fi
+
+  echo "private"
+}
+
+visibility="$(resolve_visibility)"
+
+# --- Resolve repo name -------------------------------------------------------
+if [[ -z "$repo_name" ]]; then
+  repo_name="$(basename "$(pwd)")"
+fi
+
+if [[ "$no_prefix" == false && -n "$prefix" ]]; then
+  repo_name="${prefix}-${repo_name}"
+fi
+
+full_name="${org}/${repo_name}"
+
+# --- Generate description if not provided ------------------------------------
+generate_description() {
+  # TODO: Use CLI AI (e.g. `claude -p "..."` or `gh copilot suggest`) to
+  # generate an appropriate description based on the repo contents.
+  # For now, return a placeholder.
+  echo "No additional details."
+}
+
+if [[ -z "$description" ]]; then
+  description="$(generate_description)"
+fi
+
+# --- Preflight checks --------------------------------------------------------
+command -v gh >/dev/null 2>&1 || die "gh CLI not found — install with: brew install gh"
+gh auth status >/dev/null 2>&1 || die "Not authenticated — run: gh auth login"
+
+if gh repo view "$full_name" >/dev/null 2>&1; then
+  die "Repo ${full_name} already exists on GitHub."
+fi
+
+# --- Summary -----------------------------------------------------------------
+banner "make-repo"
+info "Org:         ${org}"
+info "Repo:        ${repo_name}"
+info "Full name:   ${full_name}"
+info "Visibility:  ${visibility}"
+info "Description: ${description}"
+[[ -n "$groups" ]] && info "Groups:      ${groups} (default role: ${group_role})"
+if [[ "$parent_detected" == true ]]; then
+  info "Inherited:   org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)"
+fi
+
+if [[ "$dry_run" == true ]]; then
+  warn "Dry run — no changes made."
+  exit 0
+fi
+
+# --- Init local git if needed ------------------------------------------------
+if [[ ! -d .git && ! -f .git ]]; then
+  step "Initializing git repo"
+  git init
+  git add .
+  git commit -m "initial commit"
+  ok "Local repo initialized"
+elif [[ -f .git ]]; then
+  # Submodule — deinit from parent and reinit as standalone
+  step "Detaching from parent repo (submodule → standalone)"
+  local_gitdir="$(sed -n 's/^gitdir: //p' .git)"
+  rm .git
+  git init
+  git add .
+  git commit -m "initial commit" --allow-empty
+  ok "Detached from parent, standalone repo initialized"
+fi
+
+# --- Create the GitHub repo --------------------------------------------------
+step "Creating GitHub repo: ${full_name}"
+
+visibility_flag="--${visibility}"
+gh repo create "$full_name" \
+  --source=. \
+  --push \
+  "$visibility_flag" \
+  --description "$description"
+
+ok "Repo created and pushed: ${full_name}"
+
+# --- Grant team access -------------------------------------------------------
+if [[ -n "$groups" ]]; then
+  step "Granting team access"
+  IFS=',' read -ra team_entries <<< "$groups"
+  for entry in "${team_entries[@]}"; do
+    entry="$(echo "$entry" | xargs)"
+    if [[ "$entry" == *:* ]]; then
+      team="${entry%%:*}"
+      role="${entry#*:}"
+    else
+      team="$entry"
+      role="$group_role"
+    fi
+
+    valid_roles="pull push admin maintain triage"
+    if [[ ! " $valid_roles " =~ " $role " ]]; then
+      warn "Invalid role '${role}' for team '${team}' — skipping (valid: ${valid_roles})"
+      continue
+    fi
+
+    info "  ${team} → ${role}"
+    if gh api \
+      --method PUT \
+      -H "Accept: application/vnd.github+json" \
+      "/orgs/${org}/teams/${team}/repos/${full_name}" \
+      -f "permission=${role}" >/dev/null 2>&1; then
+      ok "  ${team}: ${role}"
+    else
+      fail "  Failed to set ${role} for team ${team} — check team name and org permissions"
+    fi
+  done
+fi
+
+# --- Done --------------------------------------------------------------------
+echo ""
+ok "Done! ${full_name}"
+info "URL: https://github.com/${full_name}"
