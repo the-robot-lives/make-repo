@@ -24,6 +24,7 @@ set -euo pipefail
 #   make-repo --no-inherit                 # skip parent repo detection
 #   make-repo --description "My project"   # set repo description
 #   make-repo --groups "team-a,team-b:admin,team-c"  # grant team access
+#   make-repo --yes                        # skip confirmation prompt
 #   make-repo --dry-run                    # show what would happen
 #
 # Environment (base):
@@ -68,6 +69,7 @@ cli_group_role=""
 dry_run=false
 no_prefix=false
 no_inherit=false
+auto_confirm=false
 
 args=("$@")
 set -- "${args[@]}"
@@ -83,8 +85,9 @@ while [[ $# -gt 0 ]]; do
     --private)     cli_visibility="private"; shift ;;
     --groups)      cli_groups="$2"; shift 2 ;;
     --group-role)  cli_group_role="$2"; shift 2 ;;
+    --yes|-y)      auto_confirm=true; shift ;;
     --dry-run)     dry_run=true; shift ;;
-    --help|-h)     head -45 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
+    --help|-h)     head -47 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
     *)             die "Unknown flag: $1 (try --help)" ;;
   esac
 done
@@ -298,21 +301,100 @@ if gh repo view "$full_name" >/dev/null 2>&1; then
   die "Repo ${full_name} already exists on GitHub."
 fi
 
-# --- Summary -----------------------------------------------------------------
-banner "make-repo"
-info "Org:         ${org}"
-info "Repo:        ${repo_name}"
-info "Full name:   ${full_name}"
-info "Visibility:  ${visibility}"
-info "Description: ${description}"
-[[ -n "$groups" ]] && info "Groups:      ${groups} (default role: ${group_role})"
-if [[ "$parent_detected" == true ]]; then
-  info "Inherited:   org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)"
-fi
+# --- Confirmation prompt -----------------------------------------------------
+confirm_and_edit() {
+  while true; do
+    banner "make-repo"
+    echo ""
+    echo -e "  ${BOLD}[1]${NC} Org:         ${CYN}${org}${NC}"
+    echo -e "  ${BOLD}[2]${NC} Repo:        ${CYN}${repo_name}${NC}"
+    echo -e "  ${BOLD}[3]${NC} Full name:   ${CYN}${org}/${repo_name}${NC}"
+    echo -e "  ${BOLD}[4]${NC} Visibility:  ${CYN}${visibility}${NC}"
+    echo -e "  ${BOLD}[5]${NC} Description: ${CYN}${description}${NC}"
+    if [[ -n "$groups" ]]; then
+      echo -e "  ${BOLD}[6]${NC} Groups:      ${CYN}${groups}${NC} (role: ${group_role})"
+    else
+      echo -e "  ${BOLD}[6]${NC} Groups:      ${CYN}(none)${NC}"
+    fi
+    if [[ "$parent_detected" == true ]]; then
+      echo -e "  ${CYN}    Inherited:  org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)${NC}"
+    fi
+    echo ""
+    echo -e "  ${BOLD}[y]${NC} Confirm and create"
+    echo -e "  ${BOLD}[n]${NC} Abort"
+    echo -e "  ${BOLD}[1-6]${NC} Edit a field"
+    echo ""
+    read -rp "  > " choice
+
+    case "$choice" in
+      y|Y|yes)
+        return 0
+        ;;
+      n|N|no|q)
+        warn "Aborted."
+        exit 1
+        ;;
+      1)
+        read -rp "  Org [${org}]: " new_val
+        [[ -n "$new_val" ]] && org="$new_val"
+        ;;
+      2)
+        read -rp "  Repo name [${repo_name}]: " new_val
+        [[ -n "$new_val" ]] && repo_name="$new_val"
+        ;;
+      3)
+        info "Edit org [1] or repo name [2] individually."
+        ;;
+      4)
+        if [[ "$visibility" == "private" ]]; then
+          visibility="public"
+        else
+          visibility="private"
+        fi
+        ok "Toggled to ${visibility}"
+        ;;
+      5)
+        read -rp "  Description [${description}]: " new_val
+        [[ -n "$new_val" ]] && description="$new_val"
+        ;;
+      6)
+        read -rp "  Groups (comma-separated, :role suffix) [${groups}]: " new_val
+        [[ -n "$new_val" ]] && groups="$new_val"
+        if [[ -n "$groups" ]]; then
+          read -rp "  Default role [${group_role}]: " new_role
+          [[ -n "$new_role" ]] && group_role="$new_role"
+        fi
+        ;;
+      *)
+        warn "Invalid choice: ${choice}"
+        ;;
+    esac
+  done
+}
 
 if [[ "$dry_run" == true ]]; then
+  banner "make-repo (dry run)"
+  info "Org:         ${org}"
+  info "Repo:        ${repo_name}"
+  info "Full name:   ${full_name}"
+  info "Visibility:  ${visibility}"
+  info "Description: ${description}"
+  [[ -n "$groups" ]] && info "Groups:      ${groups} (default role: ${group_role})"
+  if [[ "$parent_detected" == true ]]; then
+    info "Inherited:   org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)"
+  fi
   warn "Dry run — no changes made."
   exit 0
+fi
+
+if [[ "$auto_confirm" == false ]]; then
+  confirm_and_edit
+fi
+full_name="${org}/${repo_name}"
+
+# Re-check after edits
+if gh repo view "$full_name" >/dev/null 2>&1; then
+  die "Repo ${full_name} already exists on GitHub."
 fi
 
 # --- Init local git if needed ------------------------------------------------
