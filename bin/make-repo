@@ -27,6 +27,7 @@ set -euo pipefail
 #   make-repo --yes                        # skip confirmation prompt
 #   make-repo --edit                       # edit existing repo settings
 #   make-repo --edit --public              # make existing repo public
+#   make-repo --no-submodule               # don't convert to submodule in parent
 #   make-repo --dry-run                    # show what would happen
 #
 # Environment (base):
@@ -73,6 +74,7 @@ no_prefix=false
 no_inherit=false
 auto_confirm=false
 edit_mode=false
+no_submodule=false
 
 args=("$@")
 set -- "${args[@]}"
@@ -90,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --group-role)  cli_group_role="$2"; shift 2 ;;
     --yes|-y)      auto_confirm=true; shift ;;
     --edit)        edit_mode=true; shift ;;
+    --no-submodule) no_submodule=true; shift ;;
     --dry-run)     dry_run=true; shift ;;
     --help|-h)     head -47 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
     *)             die "Unknown flag: $1 (try --help)" ;;
@@ -100,6 +103,8 @@ done
 parent_org=""
 parent_visibility=""
 parent_detected=false
+parent_git_root=""
+subdir_relpath=""
 
 detect_parent_repo() {
   local dir="$PWD"
@@ -180,6 +185,8 @@ detect_parent_repo() {
     *)       parent_visibility="" ;;
   esac
 
+  parent_git_root="$git_root"
+  subdir_relpath="${PWD#${git_root}/}"
   parent_detected=true
   return 0
 }
@@ -580,6 +587,11 @@ if [[ "$dry_run" == true ]]; then
   if [[ "$parent_detected" == true ]]; then
     info "Inherited:   org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)"
   fi
+  if [[ "$no_submodule" == false && -n "$parent_git_root" ]]; then
+    info "Submodule:   will convert to submodule in ${parent_git_root} at ${subdir_relpath}"
+  elif [[ "$no_submodule" == true && -n "$parent_git_root" ]]; then
+    info "Submodule:   skipped (--no-submodule)"
+  fi
   warn "Dry run — no changes made."
   exit 0
 fi
@@ -599,6 +611,10 @@ if gh repo view "$full_name" >/dev/null 2>&1; then
   fi
   die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it."
 fi
+
+# --- Track original state for submodule conversion ---------------------------
+orig_was_submodule=false
+[[ -f .git ]] && orig_was_submodule=true
 
 # --- Init local git if needed ------------------------------------------------
 if [[ ! -d .git && ! -f .git ]]; then
@@ -667,3 +683,45 @@ fi
 echo ""
 ok "Done! ${full_name}"
 info "URL: https://github.com/${full_name}"
+
+# --- Convert to submodule in parent repo ------------------------------------
+if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" ]]; then
+  remote_url="$(git remote get-url origin 2>/dev/null)"
+  target_dir="$PWD"
+
+  step "Converting to submodule in parent repo"
+  info "Parent: ${parent_git_root}"
+  info "Path:   ${subdir_relpath}"
+  info "Remote: ${remote_url}"
+
+  if [[ "$auto_confirm" == false ]]; then
+    echo ""
+    read -rp "  Convert to submodule in parent repo? [Y/n] " sm_confirm
+    if [[ "$sm_confirm" =~ ^[nN] ]]; then
+      info "Skipped submodule conversion."
+      exit 0
+    fi
+  fi
+
+  cd "$parent_git_root"
+
+  if [[ "$orig_was_submodule" == true ]]; then
+    step "Removing old submodule entry"
+    git submodule deinit -f "$subdir_relpath" 2>/dev/null || true
+    git rm -f "$subdir_relpath" 2>/dev/null || true
+    rm -rf ".git/modules/${subdir_relpath}" 2>/dev/null || true
+  else
+    step "Removing directory from parent repo index"
+    git rm -rf "$subdir_relpath"
+  fi
+
+  step "Adding as submodule"
+  git submodule add "$remote_url" "$subdir_relpath"
+
+  step "Committing submodule"
+  git add .gitmodules "$subdir_relpath"
+  git commit -m "convert ${subdir_relpath} to submodule (${full_name})"
+
+  ok "Submodule registered: ${subdir_relpath} → ${remote_url}"
+  cd "$target_dir"
+fi
