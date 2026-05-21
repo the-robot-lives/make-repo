@@ -10,4 +10,9 @@ test:
 
 install:
 	@mkdir -p $(INSTALL_DIR)
-	install -m 755 bin/make-repo $(INSTALL_DIR)/make-repo
+	@src=$$(realpath bin/make-repo); dst=$$(realpath $(INSTALL_DIR)/make-repo 2>/dev/null); \
+	if [ "$$src" = "$$dst" ]; then \
+		echo "make-repo: already installed (same file) — skipping"; \
+	else \
+		install -m 755 bin/make-repo $(INSTALL_DIR)/make-repo; \
+	fi
