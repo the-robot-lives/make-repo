@@ -10,5 +10,4 @@ test:
 
 install:
 	@mkdir -p $(INSTALL_DIR)
-	cp bin/make-repo $(INSTALL_DIR)/
-	chmod +x $(INSTALL_DIR)/make-repo
+	install -m 755 bin/make-repo $(INSTALL_DIR)/make-repo

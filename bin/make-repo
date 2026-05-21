@@ -688,6 +688,8 @@ info "URL: https://github.com/${full_name}"
 if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" ]]; then
   remote_url="$(git remote get-url origin 2>/dev/null)"
   target_dir="$PWD"
+  dir_basename="$(basename "$subdir_relpath")"
+  copy_path="${parent_git_root}/copy.${dir_basename}"
 
   step "Converting to submodule in parent repo"
   info "Parent: ${parent_git_root}"
@@ -705,6 +707,15 @@ if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" 
 
   cd "$parent_git_root"
 
+  # Back up existing directory before any destructive operations
+  step "Backing up ${subdir_relpath} → copy.${dir_basename}"
+  if [[ -e "$copy_path" ]]; then
+    die "Backup path ${copy_path} already exists — remove it first."
+  fi
+  cp -a "$subdir_relpath" "$copy_path"
+  ok "Backup created at copy.${dir_basename}"
+
+  # Remove from git index (the backup preserves the files)
   if [[ "$orig_was_submodule" == true ]]; then
     step "Removing old submodule entry"
     git submodule deinit -f "$subdir_relpath" 2>/dev/null || true
@@ -715,8 +726,41 @@ if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" 
     git rm -rf "$subdir_relpath"
   fi
 
+  # Add as submodule — restore from backup on failure
   step "Adding as submodule"
-  git submodule add "$remote_url" "$subdir_relpath"
+  if ! git submodule add "$remote_url" "$subdir_relpath"; then
+    fail "git submodule add failed — restoring from backup"
+    git checkout -- . 2>/dev/null || true
+    rm -rf "$subdir_relpath" 2>/dev/null || true
+    mv "$copy_path" "$subdir_relpath"
+    die "Submodule conversion failed. Original directory restored."
+  fi
+
+  # Verify: compare tracked files between backup and new submodule
+  step "Verifying submodule contents match backup"
+  verify_failed=false
+
+  # Build list of files to check (skip .git entries)
+  while IFS= read -r -d '' rel_file; do
+    backup_file="${copy_path}/${rel_file}"
+    submod_file="${subdir_relpath}/${rel_file}"
+    if [[ ! -f "$submod_file" ]]; then
+      warn "Missing in submodule: ${rel_file}"
+      verify_failed=true
+    elif ! diff -q "$backup_file" "$submod_file" >/dev/null 2>&1; then
+      warn "Content mismatch: ${rel_file}"
+      verify_failed=true
+    fi
+  done < <(cd "$copy_path" && find . -type f ! -path './.git/*' ! -path './.git' -print0 | sed -z 's|^\./||')
+
+  if [[ "$verify_failed" == true ]]; then
+    warn "Verification found differences — backup preserved at copy.${dir_basename}"
+    warn "Review manually, then remove copy.${dir_basename} when satisfied."
+  else
+    ok "All files match"
+    info "Backup preserved at: ${copy_path}"
+    info "Remove it when you're satisfied: rm -rf ${copy_path}"
+  fi
 
   step "Committing submodule"
   git add .gitmodules "$subdir_relpath"
