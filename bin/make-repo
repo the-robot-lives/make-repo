@@ -723,7 +723,11 @@ if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" 
     rm -rf ".git/modules/${subdir_relpath}" 2>/dev/null || true
   else
     step "Removing directory from parent repo index"
-    git rm -rf "$subdir_relpath"
+    if git ls-files --error-unmatch "$subdir_relpath" >/dev/null 2>&1; then
+      git rm -rf "$subdir_relpath"
+    else
+      rm -rf "$subdir_relpath"
+    fi
   fi
 
   # Add as submodule — restore from backup on failure
