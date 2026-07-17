@@ -13,7 +13,7 @@ Question index for `make-repo`/`fork-repo`. Full answers: [PROJ-FAQ.md](PROJ-FAQ
 
 ## Comparison
 - How does `make-repo` differ from `fork-repo`?
-- How does `--no-inherit` differ from `--no-submodule` — do I need both?
+- How does `--no-inherit` differ from the parent-integration flags?
 - How does editing with `--edit` differ from just re-running `make-repo`?
 
 ## Capability
@@ -21,7 +21,7 @@ Question index for `make-repo`/`fork-repo`. Full answers: [PROJ-FAQ.md](PROJ-FAQ
 - Can I grant team access without touching the GitHub UI?
 
 ## Caveats
-- What happens if I forget `--no-submodule` and it converts my directory?
+- What happens if I choose submodule and later want to undo it?
 - What are the risks of running `fork-repo` inside a submodule?
 - Does it depend on the monorepo's shared shell library?
 

@@ -1,35 +1,65 @@
-# How to: keep monorepo projects as subtrees, not submodules
+# How to: choose parent integration after creating a repo
 
-**Goal:** publish a project directory inside this monorepo to GitHub *without* `make-repo` converting it into a git submodule afterward.
+**Goal:** publish a project directory inside this monorepo and intentionally keep it unchanged, register it as a subtree, or convert it to a submodule.
+
 **Prereqs:** installed (`make install`); standing inside the project directory you want to publish.
 
 ## Why this matters here
 
-This monorepo's own convention (see root `CLAUDE.md`) is: **`projects/` = git subtrees, never submodules.** `make-repo`'s default behavior is the opposite — whenever it detects you're running inside a subdirectory of an existing git repo, it will, after creating the new GitHub repo, **offer (interactively) or silently proceed (with `--yes`) to convert that directory into a submodule of the parent repo.** If you run plain `make-repo --yes` inside `projects/some-app`, you can end up with a submodule where a subtree was expected.
+This monorepo's convention is **git subtrees, not submodules**. After creating and pushing a repository, `make-repo` asks whether to integrate it into the detected parent as a subtree or submodule. **No integration is the default.**
 
 ## Steps
 
-1. Always pass `--no-submodule` when publishing a subdirectory of this monorepo:
+1. For an interactive subtree conversion, run `make-repo` and select option 2 after creation:
+
    ```bash
    cd projects/some-app
-   make-repo --no-submodule
+   make-repo
    ```
-2. If you forgot and are in the interactive prompt, the tool asks explicitly before converting:
-   ```
-   Convert to submodule in parent repo? [Y/n]
-   ```
-   Answer `n` to abort the conversion step (the GitHub repo itself has already been created and pushed at this point — only the local submodule wiring is skipped).
-3. Confirm the flag took effect with a dry run first:
-   ```bash
-   make-repo --no-submodule --dry-run
-   ```
-   Look for `Submodule:   skipped (--no-submodule)` in the output.
 
-**Verify:** after running, `git status` in the monorepo root shows no new `.gitmodules` entry, and `ls -la projects/some-app` still shows a plain directory (`.git` absent or a real subdirectory, not a `.git` *file* pointing into `.git/modules/`).
+   ```text
+   [1] No (default)
+   [2] Subtree
+   [3] Submodule
+   ```
+
+2. For scripted use, make the choice explicit:
+
+   ```bash
+   make-repo --yes --subtree       # register as subtree
+   make-repo --yes --submodule     # convert to submodule
+   make-repo --yes                 # no parent integration
+   ```
+
+3. To document an explicit no-integration choice, use:
+
+   ```bash
+   make-repo --no-integration
+   ```
+
+   `--no-submodule` remains accepted as a legacy alias.
+
+4. Preview the resolved behavior before creating anything:
+
+   ```bash
+   make-repo --subtree --dry-run
+   ```
+
+   Look for `Parent: will integrate ... as a subtree` in the output.
+
+**Verify:** for a subtree, `git log -1 --format=%B` at the monorepo root includes `git-subtree-dir` and `git-subtree-split`, and the project directory has no nested `.git`. For a submodule, `.gitmodules` contains the project path and the project has a `.git` file pointing into the parent's `.git/modules/` directory.
+
+## What each choice does
+
+- **No:** leaves the parent working tree unchanged. The new repository remains nested and standalone.
+- **Subtree:** removes the child's nested `.git`, stages only the child path in the parent, and creates a commit containing standard `git-subtree-dir` and `git-subtree-split` trailers. Later `git subtree pull`/`push` operations can use that metadata.
+- **Submodule:** backs up the directory, replaces it with a gitlink via `git submodule add`, verifies the checkout against the backup, and commits the result.
+
+For every subtree conversion, the tool prints direct `git subtree pull` and `git subtree push` commands that can be saved in parent-repository tooling. If both `push-subtrees.sh` and `pull-subtrees.sh` are already present at the parent root, it additionally configures a parent remote alias and appends the path to the registry in `push-subtrees.sh`. The pull wrapper consumes that same registry via `push-subtrees.sh --list`.
 
 ## Gotchas
 
-- **`--yes` + no `--no-submodule` = silent conversion.** In scripted/automated runs, the interactive `[Y/n]` confirmation never fires — the tool proceeds straight to conversion. Always pair `--yes` with `--no-submodule` in scripts run from inside this monorepo.
-- **If a conversion already happened:** the tool backs up the original directory to `copy.<dirname>` in the parent repo *before* the destructive `git submodule add` step, and verifies file-for-file that the new submodule matches the backup. If you need to undo, remove the submodule entry (`git submodule deinit -f <path> && git rm -f <path> && rm -rf .git/modules/<path>`) and restore from `copy.<dirname>`. Don't delete the `copy.*` backup until you've confirmed the state you want.
-- **Verification mismatch warning:** if the tool prints `Content mismatch` or `Missing in submodule` lines, the backup at `copy.<dirname>` is intentionally preserved — treat that as a signal to resolve manually before subtree-managing the directory again, not something to auto-delete.
-- **Already a submodule going in?** If the directory you `make-repo` on was already registered as a submodule (`.git` is a file), the tool detaches it to a standalone repo first, then (absent `--no-submodule`) re-adds it as a submodule of the newly created remote — same conversion path applies.
+- **`--yes` is safe by default.** Without `--subtree` or `--submodule`, it performs no parent integration.
+- **Subtree is the normal choice in this monorepo.** Choose it explicitly for content under `projects/`, `utilities/`, and other subtree-managed areas.
+- **If a submodule conversion already happened:** the tool backs up the original directory to `copy.<dirname>` before the destructive `git submodule add` step and verifies the new checkout against it. Do not delete the backup until the conversion is confirmed.
+- **Already a submodule going in?** The tool detaches it to a standalone repository before publishing. The final integration choice determines whether it becomes a subtree, is re-added as a submodule, or remains standalone.

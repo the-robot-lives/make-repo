@@ -1,7 +1,15 @@
 # Changelog — utilities/shell/make-repo
 
 ## [Unreleased]
-- No changes since the last milestone.
+
+### Added
+- Fake-`gh` integration tests covering the default, subtree, submodule, dry-run, `--no-inherit`, and conflicting-flag paths.
+
+### Changed
+- `make-repo` now asks after creation whether to integrate the new repository into its parent as a subtree, submodule, or not at all; no integration is the default.
+- Added `--subtree`, `--submodule`, and `--no-integration` for deterministic automation. `--no-submodule` remains a compatibility alias.
+- `--yes` no longer silently converts a child directory into a submodule; it leaves the parent unchanged unless an integration flag is explicit.
+- Subtree conversion now prints reusable direct pull/push commands and, when both root wrapper scripts exist, configures a parent remote and appends the new path to their shared `SUBTREES` registry.
 
 ## [m2-docs-refresh] — 2026-07-16 — tag: `utilities-shell-make-repo/m2-docs-refresh`
 Milestone summary: brought `PROJ-ARCH.md`/`PROJ-LAYOUT.md` (and summaries) up to date with the package as it actually shipped — documenting `fork-repo`, the `Makefile` install target, and `.gitignore`, none of which had been reflected in the docs since initial import.

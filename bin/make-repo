@@ -21,13 +21,16 @@ set -euo pipefail
 #   make-repo --public                     # public repo
 #   make-repo --prefix libs                # noizu/libs-<folder>
 #   make-repo --no-prefix                  # ignore GH_NEW_REPO_PREFIX
-#   make-repo --no-inherit                 # skip parent repo detection
+#   make-repo --no-inherit                 # ignore parent org/visibility
 #   make-repo --description "My project"   # set repo description
 #   make-repo --groups "team-a,team-b:admin,team-c"  # grant team access
 #   make-repo --yes                        # skip confirmation prompt
 #   make-repo --edit                       # edit existing repo settings
 #   make-repo --edit --public              # make existing repo public
-#   make-repo --no-submodule               # don't convert to submodule in parent
+#   make-repo --subtree                    # integrate into parent as a subtree
+#   make-repo --submodule                  # integrate into parent as a submodule
+#   make-repo --no-integration             # leave parent unchanged (default)
+#   make-repo --no-submodule               # legacy alias for --no-integration
 #   make-repo --dry-run                    # show what would happen
 #
 # Environment (base):
@@ -74,7 +77,18 @@ no_prefix=false
 no_inherit=false
 auto_confirm=false
 edit_mode=false
-no_submodule=false
+integration_mode="ask"
+integration_flag=""
+
+set_integration_mode() {
+  local mode="$1"
+  local flag="$2"
+  if [[ -n "$integration_flag" && "$integration_mode" != "$mode" ]]; then
+    die "Conflicting parent integration flags: ${integration_flag} and ${flag}"
+  fi
+  integration_mode="$mode"
+  integration_flag="$flag"
+}
 
 args=("$@")
 set -- "${args[@]}"
@@ -92,9 +106,12 @@ while [[ $# -gt 0 ]]; do
     --group-role)  cli_group_role="$2"; shift 2 ;;
     --yes|-y)      auto_confirm=true; shift ;;
     --edit)        edit_mode=true; shift ;;
-    --no-submodule) no_submodule=true; shift ;;
+    --subtree)      set_integration_mode "subtree" "$1"; shift ;;
+    --submodule)    set_integration_mode "submodule" "$1"; shift ;;
+    --no-integration|--no-submodule)
+                     set_integration_mode "none" "$1"; shift ;;
     --dry-run)     dry_run=true; shift ;;
-    --help|-h)     head -47 "$0" | tail -n +3 | sed 's/^# \?//'; exit 0 ;;
+    --help|-h)     sed -n '4,/^# ===/p' "$0" | sed '$d;s/^# \?//'; exit 0 ;;
     *)             die "Unknown flag: $1 (try --help)" ;;
   esac
 done
@@ -107,7 +124,6 @@ parent_git_root=""
 subdir_relpath=""
 
 detect_parent_repo() {
-  local dir="$PWD"
   local git_root=""
 
   # Walk up to find a .git that isn't ours (or is ours if we're not yet a repo)
@@ -153,10 +169,15 @@ detect_parent_repo() {
 
   [[ -z "$git_root" ]] && return 1
 
+  # Keep the filesystem relationship even when inheritance is disabled or the
+  # parent has no GitHub remote; post-create integration is a separate choice.
+  parent_git_root="$git_root"
+  subdir_relpath="${PWD#"${git_root}"/}"
+
   # Extract GitHub remote from parent
   local remote_url
   remote_url="$(git -C "$git_root" remote get-url origin 2>/dev/null || true)"
-  [[ -z "$remote_url" ]] && return 1
+  [[ -z "$remote_url" ]] && return 0
 
   # Parse org from remote URL (handles SSH and HTTPS)
   # git@github.com:org/repo.git  →  org
@@ -170,7 +191,7 @@ detect_parent_repo() {
       parsed_org="$(echo "$remote_url" | sed 's|.*github.com/||;s|/.*||')"
       ;;
   esac
-  [[ -z "$parsed_org" ]] && return 1
+  [[ -z "$parsed_org" ]] && return 0
 
   parent_org="$parsed_org"
 
@@ -185,14 +206,15 @@ detect_parent_repo() {
     *)       parent_visibility="" ;;
   esac
 
-  parent_git_root="$git_root"
-  subdir_relpath="${PWD#${git_root}/}"
   parent_detected=true
   return 0
 }
 
-if [[ "$no_inherit" == false ]]; then
-  detect_parent_repo || true
+detect_parent_repo || true
+if [[ "$no_inherit" == true ]]; then
+  parent_org=""
+  parent_visibility=""
+  parent_detected=false
 fi
 
 # --- Resolve final values (precedence: CLI > _OVERRIDE > parent > base env) --
@@ -401,7 +423,7 @@ apply_edits() {
       fi
 
       valid_roles="pull push admin maintain triage"
-      if [[ ! " $valid_roles " =~ " $role " ]]; then
+      if [[ " $valid_roles " != *" $role "* ]]; then
         warn "Invalid role '${role}' for team '${team}' — skipping (valid: ${valid_roles})"
         continue
       fi
@@ -587,10 +609,19 @@ if [[ "$dry_run" == true ]]; then
   if [[ "$parent_detected" == true ]]; then
     info "Inherited:   org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)"
   fi
-  if [[ "$no_submodule" == false && -n "$parent_git_root" ]]; then
-    info "Submodule:   will convert to submodule in ${parent_git_root} at ${subdir_relpath}"
-  elif [[ "$no_submodule" == true && -n "$parent_git_root" ]]; then
-    info "Submodule:   skipped (--no-submodule)"
+  if [[ -n "$parent_git_root" ]]; then
+    case "$integration_mode" in
+      subtree)   info "Parent:      will integrate ${subdir_relpath} as a subtree" ;;
+      submodule) info "Parent:      will integrate ${subdir_relpath} as a submodule" ;;
+      none)      info "Parent:      no integration" ;;
+      ask)
+        if [[ "$auto_confirm" == true ]]; then
+          info "Parent:      no integration (--yes default)"
+        else
+          info "Parent:      prompt after creation (default: no integration)"
+        fi
+        ;;
+    esac
   fi
   warn "Dry run — no changes made."
   exit 0
@@ -626,7 +657,6 @@ if [[ ! -d .git && ! -f .git ]]; then
 elif [[ -f .git ]]; then
   # Submodule — deinit from parent and reinit as standalone
   step "Detaching from parent repo (submodule → standalone)"
-  local_gitdir="$(sed -n 's/^gitdir: //p' .git)"
   rm .git
   git init
   git add .
@@ -661,7 +691,7 @@ if [[ -n "$groups" ]]; then
     fi
 
     valid_roles="pull push admin maintain triage"
-    if [[ ! " $valid_roles " =~ " $role " ]]; then
+    if [[ " $valid_roles " != *" $role "* ]]; then
       warn "Invalid role '${role}' for team '${team}' — skipping (valid: ${valid_roles})"
       continue
     fi
@@ -684,8 +714,199 @@ echo ""
 ok "Done! ${full_name}"
 info "URL: https://github.com/${full_name}"
 
-# --- Convert to submodule in parent repo ------------------------------------
-if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" ]]; then
+# --- Choose how to integrate the new repo into its parent -------------------
+choose_parent_integration() {
+  if [[ -z "$parent_git_root" || -z "$subdir_relpath" ]]; then
+    integration_mode="none"
+    return
+  fi
+
+  if [[ "$integration_mode" != "ask" ]]; then
+    return
+  fi
+
+  # --yes skips interactive questions. The safe default is no integration.
+  if [[ "$auto_confirm" == true ]]; then
+    integration_mode="none"
+    info "Parent integration skipped (default; use --subtree or --submodule to enable)."
+    return
+  fi
+
+  while true; do
+    banner "Integrate with Parent Repo?"
+    echo ""
+    echo -e "  ${BOLD}Parent:${NC} ${CYN}${parent_git_root}${NC}"
+    echo -e "  ${BOLD}Path:${NC}   ${CYN}${subdir_relpath}${NC}"
+    echo ""
+    echo -e "  ${BOLD}[1]${NC} No ${CYN}(default)${NC}"
+    echo -e "  ${BOLD}[2]${NC} Subtree"
+    echo -e "  ${BOLD}[3]${NC} Submodule"
+    echo ""
+    read -rp "  Choose [1]: " integration_choice || integration_choice=""
+
+    case "$integration_choice" in
+      ""|1|n|N|no|No|none) integration_mode="none"; return ;;
+      2|t|T|tree|subtree)   integration_mode="subtree"; return ;;
+      3|m|M|module|submodule)
+                              integration_mode="submodule"; return ;;
+      *) warn "Invalid choice: ${integration_choice}" ;;
+    esac
+  done
+}
+
+print_subtree_commands() {
+  local remote_url="$1"
+  local child_branch="$2"
+  local quoted_prefix quoted_remote quoted_branch
+  printf -v quoted_prefix '%q' "$subdir_relpath"
+  printf -v quoted_remote '%q' "$remote_url"
+  printf -v quoted_branch '%q' "$child_branch"
+
+  echo ""
+  info "Save these commands in your repo tooling if useful:"
+  echo ""
+  echo "    git subtree pull --prefix=${quoted_prefix} ${quoted_remote} ${quoted_branch} --squash"
+  echo "    git subtree push --prefix=${quoted_prefix} ${quoted_remote} ${quoted_branch}"
+}
+
+register_subtree_wrappers() {
+  local remote_url="$1"
+  local child_branch="$2"
+  local push_script="${parent_git_root}/push-subtrees.sh"
+  local pull_script="${parent_git_root}/pull-subtrees.sh"
+  local remote_alias base_alias existing_url registry_entry temp_script
+  local suffix=2
+
+  if [[ ! -f "$push_script" || ! -f "$pull_script" ]]; then
+    info "No push-subtrees.sh + pull-subtrees.sh pair found at the parent root; commands were printed for manual placement."
+    return
+  fi
+
+  if grep -Fq "\"${subdir_relpath}|" "$push_script"; then
+    info "Subtree wrapper registry already contains ${subdir_relpath}; no entry added."
+    return
+  fi
+
+  if ! git diff --quiet -- push-subtrees.sh \
+      || ! git diff --cached --quiet -- push-subtrees.sh; then
+    warn "push-subtrees.sh has uncommitted changes; skipped automatic registry update."
+    return
+  fi
+
+  if [[ "$subdir_relpath" == *"|"* || "$subdir_relpath" == *'"'* \
+      || "$child_branch" == *"|"* || "$child_branch" == *'"'* ]]; then
+    warn "Subtree path or branch cannot be safely added to the wrapper registry; commands were printed instead."
+    return
+  fi
+
+  base_alias="${repo_name//[^a-zA-Z0-9._-]/-}"
+  [[ -n "$base_alias" ]] || base_alias="subtree"
+  remote_alias="$base_alias"
+  while existing_url="$(git remote get-url "$remote_alias" 2>/dev/null)"; do
+    if [[ "$existing_url" == "$remote_url" ]]; then
+      break
+    fi
+    remote_alias="${base_alias}-${suffix}"
+    ((suffix += 1))
+  done
+
+  if ! git remote get-url "$remote_alias" >/dev/null 2>&1; then
+    git remote add "$remote_alias" "$remote_url"
+    ok "Parent remote configured: ${remote_alias} → ${remote_url}"
+  fi
+
+  registry_entry="${subdir_relpath}|${remote_alias}|${child_branch}"
+  temp_script="$(mktemp "${push_script}.tmp.XXXXXX")"
+  if ! awk -v entry="$registry_entry" '
+      BEGIN { in_registry = 0; inserted = 0 }
+      /^SUBTREES=\($/ { in_registry = 1 }
+      in_registry && /^\)$/ && !inserted {
+        print "  \"" entry "\""
+        inserted = 1
+      }
+      { print }
+      END { if (!inserted) exit 42 }
+    ' "$push_script" >"$temp_script"; then
+    rm -f "$temp_script"
+    warn "Could not locate SUBTREES=(...) in push-subtrees.sh; commands were printed instead."
+    return
+  fi
+
+  chmod 755 "$temp_script"
+  mv "$temp_script" "$push_script"
+
+  if git commit --only \
+      -m "register ${subdir_relpath} in subtree wrappers" \
+      -- push-subtrees.sh; then
+    ok "Wrapper registry updated: ${registry_entry}"
+    info "pull-subtrees.sh uses the same registry through push-subtrees.sh --list."
+  else
+    warn "Registry entry was appended but could not be committed; review push-subtrees.sh."
+  fi
+}
+
+convert_to_subtree() {
+  local remote_url target_dir child_head child_branch gitmodules_key metadata_backup
+  local gitmodules_changed=false
+  local -a commit_paths
+  remote_url="$(git remote get-url origin 2>/dev/null)"
+  target_dir="$PWD"
+  child_head="$(git rev-parse HEAD)"
+  child_branch="$(git branch --show-current)"
+  [[ -n "$child_branch" ]] || child_branch="HEAD"
+
+  step "Converting to subtree in parent repo"
+  info "Parent: ${parent_git_root}"
+  info "Path:   ${subdir_relpath}"
+  info "Remote: ${remote_url} (${child_branch})"
+
+  # A subtree is ordinary parent-owned files. Temporarily preserve the nested
+  # git metadata so a failed parent commit can restore the standalone repo.
+  metadata_backup="$(mktemp -d /tmp/make-repo-subtree.XXXXXX)"
+  mv "${target_dir}/.git" "${metadata_backup}/git"
+  cd "$parent_git_root"
+
+  if [[ "$orig_was_submodule" == true && -f .gitmodules ]]; then
+    cp -a .gitmodules "${metadata_backup}/gitmodules"
+    gitmodules_key="$(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null \
+      | awk -v path="$subdir_relpath" '$2 == path { sub(/\.path$/, "", $1); print $1; exit }')"
+    if [[ -n "$gitmodules_key" ]]; then
+      git config -f .gitmodules --remove-section "$gitmodules_key"
+      gitmodules_changed=true
+    fi
+  fi
+
+  commit_paths=("$subdir_relpath")
+  [[ "$orig_was_submodule" == true && -f .gitmodules ]] && commit_paths+=(".gitmodules")
+  if ! git add -A -- "$subdir_relpath"; then
+    [[ "$gitmodules_changed" == true ]] && cp -a "${metadata_backup}/gitmodules" .gitmodules
+    mv "${metadata_backup}/git" "${target_dir}/.git"
+    rm -rf "${metadata_backup:?}"
+    die "Could not stage ${subdir_relpath}; standalone repository restored."
+  fi
+
+  if ! git commit --only --allow-empty \
+      -m "register ${subdir_relpath} as subtree (${full_name})" \
+      -m "git-subtree-dir: ${subdir_relpath}
+git-subtree-split: ${child_head}" \
+      -- "${commit_paths[@]}"; then
+    git reset --quiet HEAD -- "${commit_paths[@]}" 2>/dev/null || true
+    [[ "$gitmodules_changed" == true ]] && cp -a "${metadata_backup}/gitmodules" .gitmodules
+    mv "${metadata_backup}/git" "${target_dir}/.git"
+    rm -rf "${metadata_backup:?}"
+    die "Subtree commit failed; standalone repository restored."
+  fi
+
+  [[ "$orig_was_submodule" == true ]] && rm -rf ".git/modules/${subdir_relpath}"
+  rm -rf "${metadata_backup:?}"
+
+  ok "Subtree registered: ${subdir_relpath} → ${remote_url} (${child_branch})"
+  print_subtree_commands "$remote_url" "$child_branch"
+  register_subtree_wrappers "$remote_url" "$child_branch"
+  cd "$target_dir"
+}
+
+convert_to_submodule() {
   remote_url="$(git remote get-url origin 2>/dev/null)"
   target_dir="$PWD"
   dir_basename="$(basename "$subdir_relpath")"
@@ -695,15 +916,6 @@ if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" 
   info "Parent: ${parent_git_root}"
   info "Path:   ${subdir_relpath}"
   info "Remote: ${remote_url}"
-
-  if [[ "$auto_confirm" == false ]]; then
-    echo ""
-    read -rp "  Convert to submodule in parent repo? [Y/n] " sm_confirm
-    if [[ "$sm_confirm" =~ ^[nN] ]]; then
-      info "Skipped submodule conversion."
-      exit 0
-    fi
-  fi
 
   cd "$parent_git_root"
 
@@ -772,4 +984,11 @@ if [[ "$no_submodule" == false && -n "$parent_git_root" && -n "$subdir_relpath" 
 
   ok "Submodule registered: ${subdir_relpath} → ${remote_url}"
   cd "$target_dir"
-fi
+}
+
+choose_parent_integration
+case "$integration_mode" in
+  subtree)   convert_to_subtree ;;
+  submodule) convert_to_submodule ;;
+  none)      info "Parent repo left unchanged." ;;
+esac

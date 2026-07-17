@@ -38,7 +38,7 @@ fork-repo --help
 
 **Verify:** the tool prints `Done! <org>/<repo>` with the GitHub URL; `gh repo view <org>/<repo>` confirms it exists.
 **Gotchas:**
-- Running this inside a subdirectory of an existing git repo (including this monorepo) auto-inherits that parent's org/visibility — see the submodule-conversion guide below, it also offers to wire the new repo back in as a submodule.
+- Running this inside a subdirectory of an existing git repo (including this monorepo) auto-inherits that parent's org/visibility. After creation it asks whether to leave the parent unchanged (default), register a subtree, or register a submodule.
 - Repo already exists on GitHub → the tool errors and tells you to use `--edit` instead (see next guide).
 - Non-interactive/CI use: pass `--yes` (or `-y`) plus explicit flags to skip the prompt entirely, e.g. `make-repo --org my-org --public --yes`.
 
@@ -121,9 +121,9 @@ fork-repo --help
 
 ---
 
-## How to: keep monorepo projects as subtrees, not submodules
+## How to: choose subtree, submodule, or no parent integration
 
-**Goal:** publish a project directory inside this monorepo to GitHub *without* `make-repo` converting it into a git submodule afterward.
+**Goal:** publish a project directory inside this monorepo and deliberately select its parent-repository integration.
 **Prereqs:** none beyond installation.
 
 → *See [howto/avoid-submodule-conversion.md](howto/avoid-submodule-conversion.md)*
@@ -155,7 +155,7 @@ fork-repo --help
    cd projects/some-app   # inside a monorepo/parent repo
    make-repo --no-inherit
    ```
-   This skips parent-repo detection entirely (priority 3 of the precedence chain never runs), so `org`/`visibility` fall through to `_OVERRIDE` env vars, then base env vars, then built-in defaults (`noizu`, `private`).
+   This excludes the parent's values from priority 3 of the precedence chain, so `org`/`visibility` fall through to `_OVERRIDE` env vars, then base env vars, then built-in defaults (`noizu`, `private`). The parent path is still detected so a later subtree/submodule choice remains possible.
 2. Combine with explicit flags if the defaults still aren't what you want:
    ```bash
    make-repo --no-inherit --org my-personal-account --public
@@ -163,5 +163,5 @@ fork-repo --help
 
 **Verify:** `make-repo --no-inherit --dry-run` shows `Org:`/`Visibility:` resolved from env/defaults, not from the containing repo's GitHub remote.
 **Gotchas:**
-- `--no-inherit` only turns off *parent detection* (tier 3) — it does not disable `_OVERRIDE` env vars (tier 2), so a stray `GH_NEW_REPO_ORG_OVERRIDE` in your shell still wins.
-- This is unrelated to `--no-submodule` — `--no-inherit` controls where org/visibility values come from; `--no-submodule` controls whether the directory gets wired up as a git submodule afterward. Most personal-account publishing wants both.
+- `--no-inherit` only turns off *parent value inheritance* (tier 3) — it does not disable `_OVERRIDE` env vars (tier 2), so a stray `GH_NEW_REPO_ORG_OVERRIDE` in your shell still wins.
+- This is unrelated to the integration choice: `--no-inherit` controls where org/visibility values come from; `--subtree`, `--submodule`, or the default no-integration choice controls what happens to the directory afterward.

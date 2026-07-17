@@ -25,9 +25,15 @@ graph TD
     L --> M
     M --> N{Teams specified?}
     N -->|Yes| O[Grant team access via gh API]
-    N -->|No| P[Done]
+    N -->|No| P{Parent integration?}
     O --> P
-    G --> P
+    P -->|No, default| Q[Leave parent unchanged]
+    P -->|Subtree| R[Remove nested git metadata and commit subtree trailers]
+    P -->|Submodule| S[Replace directory with git submodule]
+    Q --> T[Done]
+    R --> T
+    S --> T
+    G --> T
 ```
 
 ## fork-repo Flow
@@ -49,18 +55,21 @@ Target org resolves: CLI `--org` > `GH_FORK_TARGET_ORG_OVERRIDE` > `GH_FORK_TARG
 | Interactive prompt | both | Numbered-field menu for reviewing/editing settings before acting (`--yes` skips) |
 | Repo creator | make-repo | `gh repo create` with `--source=. --push` |
 | Team granter | make-repo | `gh api PUT` to `/orgs/{org}/teams/{team}/repos/{repo}` |
+| Parent integrator | make-repo | Post-create choice: none (default), subtree metadata commit, or backed-up submodule conversion; prints direct subtree commands and optionally updates root wrapper registry |
 | Edit mode | make-repo | Fetches current settings from GitHub, applies only changed fields |
 | Remote rewirer | fork-repo | Renames origin→upstream, points origin at the fork, matching original ssh/https scheme |
 
 ## Installation
 
-`Makefile` `install` target copies both scripts to `~/.local/bin` (mode 755), skipping when `realpath` shows source and destination are already the same file (symlink-aware). `compile` and `test` are no-ops — the target trio matches the monorepo's `make install-utilities` convention so this package can participate in the batch utility install.
+`Makefile` `install` target copies both scripts to `~/.local/bin` (mode 755), skipping when `realpath` shows source and destination are already the same file (symlink-aware). `test` runs isolated fake-`gh` integration coverage for the none/subtree/submodule paths; `compile` is a no-op. The target trio matches the monorepo's `make install-utilities` convention.
 
 ## Key Design Decisions
 
 - **Single-file, no dependencies beyond `gh`/`git`** — portability; no k8-lib sourcing, works outside the Noizu monorepo
 - **Parent repo inheritance** (make-repo) — submodule and subdirectory contexts auto-inherit org and visibility, reducing flags needed in monorepo/subtree workflows
 - **Interactive by default, scriptable with `--yes`** — safety for humans, automation for CI; `--dry-run` for previews
+- **No implicit parent mutation** — post-create integration defaults to none; `--subtree` and `--submodule` make automation explicit
+- **Wrapper-aware subtree registration** — if both root pull/push wrappers exist, add a collision-safe parent remote and idempotent entry to their shared registry; otherwise only print portable direct commands
 - **`_OVERRIDE` env tier** — lets `.envrc` files pin values that beat parent detection without requiring CLI flags
 - **`generate_description()` stub** — placeholder for future AI-generated repo descriptions (e.g. via `claude` or `gh copilot`)
 

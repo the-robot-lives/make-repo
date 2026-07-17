@@ -26,13 +26,13 @@ Because the tool spans three different usage modes — ad hoc interactive use, `
 
 ### When is this the wrong tool for publishing a monorepo project?
 
-When you haven't decided yet whether the directory should become a subtree or a submodule — `make-repo`'s default behavior, absent `--no-submodule`, is to convert the directory into a git submodule of the parent repo after creating it on GitHub. This monorepo's own convention is subtrees, never submodules (see root `CLAUDE.md`), so running plain `make-repo --yes` inside `projects/some-app` silently produces the wrong result. If you're publishing anything under `projects/`, always pass `--no-submodule`.
+When you have not decided whether the directory should remain standalone, become a subtree, or become a submodule. Interactive `make-repo` asks after creation and defaults to no parent integration; scripts should pass `--subtree` or `--submodule` explicitly. This monorepo uses subtrees, so `--subtree` is the normal choice for new content under `projects/`.
 
 → *Full discussion: [howto/avoid-submodule-conversion.md](howto/avoid-submodule-conversion.md)*
 
 ### When should I not run this non-interactively?
 
-When you haven't first confirmed the resolved values with `--dry-run`. `--yes` skips both the confirmation prompt *and* the submodule-conversion `[Y/n]` guard — in a monorepo subdirectory that means a script running `--yes` without `--no-submodule` converts the directory to a submodule with no chance to abort. Non-interactive use is fine and intended (CI, batch scripting), but it removes every safety net the interactive mode gives you, so get the flags right first via a dry run.
+When you have not first confirmed the resolved values with `--dry-run`. `--yes` skips interactive questions and chooses no parent integration unless `--subtree` or `--submodule` is explicit. Non-interactive use is intended for CI and batch scripting, but org, visibility, and integration choices should still be made explicit and previewed.
 
 → *See [PROJ-HOWTO.md](PROJ-HOWTO.md#how-to-set-org-visibility-description-or-team-access-without-the-prompt).*
 
@@ -40,13 +40,13 @@ When you haven't first confirmed the resolved values with `--dry-run`. `--yes` s
 
 ### How does `make-repo` differ from `fork-repo`?
 
-They cover opposite starting points: `make-repo` creates a brand-new GitHub repo from a directory you already have; `fork-repo` forks an *existing* GitHub repo (yours or someone else's) and wires local remotes so `origin` points at your fork and `upstream` at the source. Both share the same precedence-resolution and interactive-confirm/`--dry-run` conventions, but `fork-repo` has no submodule-conversion behavior and no team-access granting — those are `make-repo`-only concerns.
+They cover opposite starting points: `make-repo` creates a brand-new GitHub repo from a directory you already have; `fork-repo` forks an *existing* GitHub repo (yours or someone else's) and wires local remotes so `origin` points at your fork and `upstream` at the source. Both share the same precedence-resolution and interactive-confirm/`--dry-run` conventions, but `fork-repo` has no parent-integration behavior and no team-access granting — those are `make-repo`-only concerns.
 
 → *See [PROJ-ARCH.md](PROJ-ARCH.md#fork-repo-flow).*
 
-### How does `--no-inherit` differ from `--no-submodule` — do I need both?
+### How does `--no-inherit` differ from the parent-integration flags?
 
-They control different, independent things: `--no-inherit` decides *where org/visibility values come from* (skips parent-repo detection, tier 3 of the precedence chain), while `--no-submodule` decides *what happens to the local directory afterward* (skips converting it into a git submodule of the parent). Neither implies the other — you can inherit the parent's org but still opt out of the submodule conversion, or vice versa. The common case where you want both together is publishing from inside a monorepo checkout to an unrelated personal account: `--no-inherit` stops it from copying the monorepo's org/visibility, and `--no-submodule` stops it from wiring the directory back into the monorepo's tree.
+They control independent things: `--no-inherit` prevents the detected parent's org/visibility from participating in value resolution, while `--subtree`, `--submodule`, and `--no-integration` decide *what happens to the local directory after creation*. The filesystem parent is still detected so integration remains available. No integration is already the default, and `--no-submodule` is retained only as an alias for `--no-integration`.
 
 → *See [PROJ-HOWTO.md](PROJ-HOWTO.md#how-to-create-a-repo-without-inheriting-the-parent-repos-orgvisibility) and [howto/avoid-submodule-conversion.md](howto/avoid-submodule-conversion.md).*
 
@@ -72,7 +72,7 @@ Yes, via `--groups`/`GH_NEW_REPO_GROUPS[_OVERRIDE]`, both on creation and throug
 
 ## Caveats
 
-### What happens if I forget `--no-submodule` and it converts my directory?
+### What happens if I choose submodule and later want to undo it?
 
 It's recoverable but manual. Before the destructive `git submodule add`, the tool backs up the original directory to `copy.<dirname>` in the parent repo and verifies file-for-file that the new submodule matches the backup — so nothing is lost, but undoing requires you to run `git submodule deinit`/`git rm`/`rm -rf .git/modules/<path>` yourself and restore from the `copy.*` backup. Don't delete that backup until you've confirmed the restored state is correct.
 
