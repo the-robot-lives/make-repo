@@ -188,6 +188,17 @@ test_yes_dry_run_reports_safe_default() {
   [[ ! -e "${case_dir}/created" ]] || fail "dry run created a repository"
 }
 
+test_headless_flag_sets_org() {
+  local case_dir="${TEST_ROOT}/headless"
+  local output
+  make_parent "$case_dir"
+  output="$(run_make_repo "$case_dir" --org my-org --headless --dry-run | strip_color)"
+
+  assert_contains "$output" "Org:         my-org"
+  assert_contains "$output" "Parent:      no integration (--yes default)"
+  [[ ! -e "${case_dir}/created" ]] || fail "dry run created a repository"
+}
+
 test_conflicting_flags_fail() {
   local output
   if output="$("$MAKE_REPO" --subtree --submodule 2>&1 | strip_color)"; then
@@ -202,6 +213,7 @@ test_subtree_wrapper_registration
 test_submodule_integration
 test_no_inherit_still_allows_integration
 test_yes_dry_run_reports_safe_default
+test_headless_flag_sets_org
 test_conflicting_flags_fail
 
 echo "PASS: make-repo parent integration"

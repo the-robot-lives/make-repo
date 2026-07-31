@@ -40,7 +40,7 @@ fork-repo --help
 **Gotchas:**
 - Running this inside a subdirectory of an existing git repo (including this monorepo) auto-inherits that parent's org/visibility. After creation it asks whether to leave the parent unchanged (default), register a subtree, or register a submodule.
 - Repo already exists on GitHub → the tool errors and tells you to use `--edit` instead (see next guide).
-- Non-interactive/CI use: pass `--yes` (or `-y`) plus explicit flags to skip the prompt entirely, e.g. `make-repo --org my-org --public --yes`.
+- Non-interactive/CI use: pass `--yes` (or `-y`) or the explicit headless switch `--headless` (alias `--non-interactive`) plus explicit flags to skip the prompt entirely, e.g. `make-repo --org my-org --public --yes`, or `make-repo --org my-org --headless` for unambiguous CI scripting.
 
 ---
 

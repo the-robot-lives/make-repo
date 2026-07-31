@@ -70,6 +70,7 @@ When run inside a subdirectory of an existing GitHub repo (or a submodule), `mak
 | `--groups LIST` | Comma-separated teams, optional `:role` suffix |
 | `--group-role ROLE` | Default team role (default: `push`) |
 | `--yes`, `-y` | Skip confirmation prompt |
+| `--headless`, `--non-interactive` | Non-interactive/headless mode; skip all prompts (like `--yes`) |
 | `--edit` | Edit an existing repo (visibility, description, teams) |
 | `--subtree` | Register the new repo as a subtree in its parent |
 | `--submodule` | Register the new repo as a submodule in its parent |
@@ -120,6 +121,9 @@ make-repo --groups "devs,ops:admin,interns:pull"
 
 # Skip confirmation for scripting
 make-repo --yes --org my-org --repo my-repo
+
+# Headless/non-interactive (explicit CI/scripting switch)
+make-repo --org my-org --headless
 
 # Scripted parent integration must be explicit
 make-repo --yes --subtree

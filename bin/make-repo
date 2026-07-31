@@ -25,6 +25,9 @@ set -euo pipefail
 #   make-repo --description "My project"   # set repo description
 #   make-repo --groups "team-a,team-b:admin,team-c"  # grant team access
 #   make-repo --yes                        # skip confirmation prompt
+#   make-repo --headless                   # non-interactive/headless mode; skip all prompts
+#                                          # (alias: --non-interactive)
+#   make-repo --org my-org --headless      # non-interactive: my-org/<folder>, private
 #   make-repo --edit                       # edit existing repo settings
 #   make-repo --edit --public              # make existing repo public
 #   make-repo --subtree                    # integrate into parent as a subtree
@@ -105,6 +108,7 @@ while [[ $# -gt 0 ]]; do
     --groups)      cli_groups="$2"; shift 2 ;;
     --group-role)  cli_group_role="$2"; shift 2 ;;
     --yes|-y)      auto_confirm=true; shift ;;
+    --headless|--non-interactive) auto_confirm=true; shift ;;
     --edit)        edit_mode=true; shift ;;
     --subtree)      set_integration_mode "subtree" "$1"; shift ;;
     --submodule)    set_integration_mode "submodule" "$1"; shift ;;

@@ -67,7 +67,7 @@ Target org resolves: CLI `--org` > `GH_FORK_TARGET_ORG_OVERRIDE` > `GH_FORK_TARG
 
 - **Single-file, no dependencies beyond `gh`/`git`** — portability; no k8-lib sourcing, works outside the Noizu monorepo
 - **Parent repo inheritance** (make-repo) — submodule and subdirectory contexts auto-inherit org and visibility, reducing flags needed in monorepo/subtree workflows
-- **Interactive by default, scriptable with `--yes`** — safety for humans, automation for CI; `--dry-run` for previews
+- **Interactive by default, scriptable with `--yes` or `--headless`** — safety for humans, automation for CI; both `--yes`/`-y` and `--headless` (alias `--non-interactive`) enable non-interactive mode and skip all prompts, with `--headless` as the explicit, semantically-named CI/scripting switch; `--dry-run` for previews
 - **No implicit parent mutation** — post-create integration defaults to none; `--subtree` and `--submodule` make automation explicit
 - **Wrapper-aware subtree registration** — if both root pull/push wrappers exist, add a collision-safe parent remote and idempotent entry to their shared registry; otherwise only print portable direct commands
 - **`_OVERRIDE` env tier** — lets `.envrc` files pin values that beat parent detection without requiring CLI flags
