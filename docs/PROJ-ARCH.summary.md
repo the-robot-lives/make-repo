@@ -1,13 +1,11 @@
 # Architecture Summary
 
-Two-tool Bash CLI package wrapping `gh`: `make-repo` (create/edit GitHub repos) and `fork-repo` (fork + remote rewiring). No k8-lib dependency — portable outside the Noizu monorepo.
+Two-tool Bash package wrapping `gh` + `git` (no k8-lib): **`bin/make-repo`** (~999 lines) create/edit GitHub repos; **`bin/fork-repo`** (~436 lines) fork + remote rewiring.
 
-**make-repo flow**: Parse CLI flags → detect parent repo context → resolve values through 5-tier precedence (CLI > _OVERRIDE env > parent > base env > defaults) → interactive confirm or `--yes` → create/edit repo → optionally grant team access → choose no parent integration (default), subtree, or submodule. Subtree mode prints direct pull/push commands and updates a detected root wrapper registry.
+**make-repo:** CLI/`_OVERRIDE`/parent/base/defaults resolution → optional submodule origin identity → dry-run or interactive/`--yes`/`--headless` confirm → `gh repo create --source=. --push` (or edit) → optional team `PUT` → parent integration **none** (default), **subtree** (trailers + optional `push-subtrees.sh` registry), or **submodule** (backup + verify). `--no-inherit` drops org/visibility inheritance but keeps parent path for integration.
 
-**fork-repo flow**: Local clone mode (fork cwd's repo, origin→upstream, fork becomes origin) or remote slug mode (`fork-repo org/repo`, optional `--clone`). Target org: `--org` > `GH_FORK_TARGET_ORG_OVERRIDE` > `GH_FORK_TARGET_ORG` > user.
+**fork-repo:** local (cwd origin → rename origin/upstream) or remote slug (`--clone` optional). Target org: `--org` > overrides > user. Blocks forking into source org; preserves ssh/https.
 
-**Components**: CLI parsers, parent repo detector, value resolvers, interactive prompts, repo creator, team granter, parent integrator, edit mode, remote rewirer.
+**Install/test:** `make install` → `~/.local/bin` (symlink-aware); `make test` → fake-`gh` suite (none/subtree/wrappers/submodule/dry-run/headless/conflicts). Wrapper test expects monorepo root subtree scripts.
 
-**Install/test**: `make install` copies both scripts to `~/.local/bin` (symlink-aware skip); `make test` exercises none/subtree/submodule integration with isolated repositories and a fake `gh`.
-
-**Design**: Only `gh` + `git` required. Interactive by default, scriptable with `--yes`/`--dry-run`; parent integration defaults to none and requires explicit flags in scripts. Parent inheritance reduces boilerplate in monorepo/subtree workflows. `generate_description()` stubbed for future AI descriptions.
+**Design:** interactive-safe, scriptable with explicit integration flags; fail-safe subtree/submodule conversion; `generate_description()` still a stub.
