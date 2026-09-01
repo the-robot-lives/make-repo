@@ -13,6 +13,7 @@ Question index for `make-repo`/`fork-repo`. Full answers: [PROJ-FAQ.md](PROJ-FAQ
 
 ## Comparison
 - How does `make-repo` differ from `fork-repo`?
+- Does `--origin` rewrite my worktree `.git` files?
 - How does `--no-inherit` differ from the parent-integration flags?
 - How does editing with `--edit` differ from just re-running `make-repo`?
 

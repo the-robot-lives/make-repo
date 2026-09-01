@@ -24,15 +24,19 @@ graph TD
     S -->|No| F
     S2 --> F
     F{gh repo view exists?}
+    F -->|Yes + --origin| O1[origin-mode: attach or swap remotes]
     F -->|Yes + --edit or visibility flag| G[edit_existing / apply_edits]
-    F -->|Yes, no edit path| H[die: already exists]
+    F -->|Yes, no edit path| H[die: already exists; hint --origin]
     F -->|No| I{--dry-run?}
     I -->|Yes| J[Print resolved plan, exit]
     I -->|No| K{--yes / --headless?}
     K -->|No| L[confirm_and_edit menu]
     K -->|Yes| M[git init if needed]
     L --> M
-    M --> N["gh repo create --source=. --push"]
+    M --> OM{--origin and local git exists?}
+    OM -->|No| N["gh repo create --source=. --push"]
+    OM -->|Yes| O1
+    O1 --> O
     N --> O{groups set?}
     O -->|Yes| P["gh api PUT team repo permission"]
     O -->|No| Q
@@ -146,6 +150,7 @@ Target org: `--org` > `GH_FORK_TARGET_ORG_OVERRIDE` > `GH_FORK_TARGET_ORG` > aut
 - `--no-inherit` still allows subtree conversion
 - `--yes --dry-run` / `--headless` report safe parent default without create
 - Conflicting `--subtree --submodule` fails
+- `--origin` add/swap/decline/collision/attach; submodule `.gitmodules` + preserved gitdir; worktree shared remotes; dry-run noop; existing GitHub without `--origin` still dies
 
 **Note:** the wrapper-registration case reaches outside the package to copy scripts from the monorepo root (`../../..` from package root). Outside this monorepo checkout that case may fail even though production code only *reads* wrappers if present.
 
@@ -161,6 +166,21 @@ Static checks (dev-only): `shellcheck bin/make-repo tests/run.sh`; `bash -n …`
 - **`_OVERRIDE` env tier** — direnv/`.envrc` can beat parent detection without CLI flags
 - **`generate_description()` stub** — currently returns `"No additional details."`; reserved for future AI CLI integration
 - **Auto edit on existing + visibility flag** — avoids a hard error when operators only meant to flip public/private
+- **`--origin` is remote surgery, not a second tool** — same org/repo picker; never detaches submodules; never force-pushes; `--yes` cannot swap without `--swap-origin`
+- **Do not patch worktree `.git` files** — they only store `gitdir:`. Remotes live in `$GIT_COMMON_DIR/config`. Extra work is `.gitmodules` + `git submodule sync` and rare per-worktree `remote.origin.url` overrides
+
+### Origin mode
+
+`--origin` / `-origin` classifies cwd as `none` | `nested` | `repo` | `worktree` | `submodule`, then:
+
+| Action | When |
+|--------|------|
+| Usual create (`--source=. --push`) | Nested/empty checkout with no remotes |
+| `remote add origin` | Existing git, no origin |
+| no-op | Origin already matches picked `org/repo` (scheme preserved) |
+| swap | Origin differs: rename to `{owner}-origin` (collision → `-2`, …) then add new origin |
+
+Submodule: edit current superproject `.gitmodules`, `git submodule sync -- <path>` here and in other parent worktrees that have the path checked out. Superproject is **not** auto-committed. Parent subtree/submodule conversion is skipped unless `--subtree`/`--submodule` is explicit.
 
 ## Technology
 

@@ -33,7 +33,7 @@ make-repo/
 |------|---------|
 | `bin/make-repo` | Create or edit GitHub repos via `gh`; parent org/visibility inheritance; optional subtree/submodule integration (default: none) |
 | `bin/fork-repo` | Fork current clone or `org/repo` slug; local mode rewires remotes; slug mode optional `--clone` |
-| `tests/run.sh` | Temp parent/child repos + fake `gh`; covers none/subtree/submodule, dry-run, headless, flag conflicts |
+| `tests/run.sh` | Temp parent/child repos + fake `gh`; covers none/subtree/submodule, `--origin` add/swap/attach/worktree/submodule, dry-run, headless, flag conflicts |
 | `Makefile` | `make install` (symlink-aware copy of both bins); `make test` runs suite; `compile` is no-op |
 | `docs/howto/avoid-submodule-conversion.md` | When/how to choose parent integration after create |
 

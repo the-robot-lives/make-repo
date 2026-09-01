@@ -77,6 +77,9 @@ When run inside a subdirectory of an existing GitHub repo (or a submodule), `mak
 | `--no-integration` | Leave the parent repo unchanged (default) |
 | `--no-submodule` | Legacy alias for `--no-integration` |
 | `--dry-run` | Show resolved values without creating anything |
+| `--origin`, `-origin` | Bind or create `origin` for this checkout (existing git repos, worktrees, submodules) |
+| `--swap-origin` | Headless permission to rename an existing, different `origin` (required with `--yes` when a swap would happen) |
+| `--keep-origin-as NAME` | Park the previous `origin` as `NAME` (default `{owner}-origin`) |
 | `--help`, `-h` | Show usage |
 
 ## Environment Variables
@@ -144,7 +147,33 @@ make-repo --edit --public --description "Updated desc" --yes
 
 # Add team access to existing repo
 make-repo --edit --groups "devs,ops:admin" --yes
+
+# Bind origin on an existing local git repo (create GitHub if needed)
+make-repo --origin --yes
+
+# Swap an existing origin; park the old remote as {owner}-origin
+make-repo --origin --yes --swap-origin
+
+# Preview origin swap with no mutations
+make-repo --origin --dry-run
 ```
+
+## Binding and swapping origin
+
+`make-repo --origin` (alias `-origin`) is for checkouts that already have git metadata, or for wiring remotes after a normal create.
+
+| Local state | What happens |
+| --- | --- |
+| Not a git repo | Same as usual create (`git init` + GitHub repo + `origin`) |
+| Git repo, no `origin` | Create the GitHub repo if missing, `git remote add origin`, push if it is a fast-forward or a new branch |
+| Git repo, `origin` already matches | No remote changes |
+| Git repo, `origin` differs | Ask to swap. **Yes:** rename `origin` → `{owner}-origin` (or `--keep-origin-as`), then set the new `origin`. **No:** abort. `--yes` refuses to swap unless you also pass `--swap-origin` |
+| Submodule | Same remote swap **without detaching** `.git`. Updates the superproject `.gitmodules` URL and runs `git submodule sync`. Does **not** auto-commit the parent |
+| Linked worktree | Remotes live in the shared git config — all worktrees see the change. Per-worktree `remote.origin.url` overrides are updated if present |
+
+Never force-pushes. Parent subtree/submodule conversion is skipped unless you pass `--subtree` or `--submodule` explicitly.
+
+Without `--origin`, an existing GitHub repo still errors (use `--edit`), and a local `origin` errors with a hint to re-run with `--origin`.
 
 ## Parent Repo Integration
 
@@ -217,7 +246,7 @@ Run the isolated integration suite:
 make test
 ```
 
-The suite creates temporary parent and child repositories and supplies a fake `gh` executable, so it tests the default, subtree, submodule, wrapper-registry, dry-run, and conflicting-flag paths without contacting GitHub or changing the working repository.
+The suite creates temporary parent and child repositories and supplies a fake `gh` executable, so it tests the default, subtree, submodule, wrapper-registry, `--origin` add/swap/attach/worktree/submodule, dry-run, and conflicting-flag paths without contacting GitHub or changing the working repository. Run the suite with Bash 4+ (macOS `/bin/bash` is 3.2 and cannot parse `${var,,}` in this script).
 
 Run static shell validation separately:
 
