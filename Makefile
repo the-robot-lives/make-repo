@@ -6,7 +6,9 @@ compile:
 	@true
 
 test:
-	@bash tests/run.sh
+	@if bash -c '[[ $${BASH_VERSINFO[0]} -ge 4 ]]' 2>/dev/null; then bash tests/run.sh; \
+	elif [ -x /opt/homebrew/bin/bash ]; then /opt/homebrew/bin/bash tests/run.sh; \
+	else echo "make-repo tests need Bash 4+ (macOS /bin/bash is 3.2)" >&2; exit 1; fi
 
 install:
 	@mkdir -p $(INSTALL_DIR)

@@ -34,6 +34,10 @@ set -euo pipefail
 #   make-repo --submodule                  # integrate into parent as a submodule
 #   make-repo --no-integration             # leave parent unchanged (default)
 #   make-repo --no-submodule               # legacy alias for --no-integration
+#   make-repo --origin                     # bind/create origin (swap if origin exists)
+#   make-repo -origin                      # alias for --origin
+#   make-repo --origin --swap-origin       # headless rename of an existing origin
+#   make-repo --keep-origin-as NAME        # park old origin as NAME (default {owner}-origin)
 #   make-repo --dry-run                    # show what would happen
 #
 # Environment (base):
@@ -80,6 +84,9 @@ no_prefix=false
 no_inherit=false
 auto_confirm=false
 edit_mode=false
+origin_mode=false
+swap_origin=false
+keep_origin_as=""
 integration_mode="ask"
 integration_flag=""
 
@@ -110,6 +117,13 @@ while [[ $# -gt 0 ]]; do
     --yes|-y)      auto_confirm=true; shift ;;
     --headless|--non-interactive) auto_confirm=true; shift ;;
     --edit)        edit_mode=true; shift ;;
+    --origin|-origin) origin_mode=true; shift ;;
+    --swap-origin) origin_mode=true; swap_origin=true; shift ;;
+    --keep-origin-as)
+      keep_origin_as="$2"
+      origin_mode=true
+      shift 2
+      ;;
     --subtree)      set_integration_mode "subtree" "$1"; shift ;;
     --submodule)    set_integration_mode "submodule" "$1"; shift ;;
     --no-integration|--no-submodule)
@@ -119,6 +133,10 @@ while [[ $# -gt 0 ]]; do
     *)             die "Unknown flag: $1 (try --help)" ;;
   esac
 done
+
+if [[ -n "$keep_origin_as" && "$origin_mode" != true ]]; then
+  die "--keep-origin-as requires --origin"
+fi
 
 # --- Parent repo detection ---------------------------------------------------
 parent_org=""
@@ -330,6 +348,475 @@ if [[ -z "$description" ]]; then
   description="$(generate_description)"
 fi
 
+# --- Origin / checkout helpers -----------------------------------------------
+parse_scheme=""
+parse_owner=""
+parse_repo=""
+checkout_kind="none"
+git_common_dir=""
+git_dir=""
+superproject=""
+sub_path=""
+sub_name=""
+current_origin=""
+origin_scheme="ssh"
+worktree_count=0
+origin_action="create"
+target_origin_url=""
+planned_parked_name=""
+github_existed=false
+used_source_push=false
+
+parse_remote_url() {
+  local url="$1"
+  local rest=""
+  parse_scheme=""
+  parse_owner=""
+  parse_repo=""
+  [[ -n "$url" ]] || return 1
+  url="${url%/}"
+  case "$url" in
+    git@github.com:*)
+      parse_scheme="ssh"
+      rest="${url#git@github.com:}"
+      ;;
+    https://github.com/*|http://github.com/*)
+      parse_scheme="https"
+      rest="${url#*github.com/}"
+      ;;
+    git@*)
+      parse_scheme="ssh"
+      rest="${url#*:}"
+      ;;
+    https://*|http://*)
+      parse_scheme="https"
+      rest="${url#*://}"
+      rest="${rest#*/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  rest="${rest%.git}"
+  parse_owner="${rest%%/*}"
+  parse_repo="${rest#*/}"
+  if [[ -z "$parse_owner" || -z "$parse_repo" || "$parse_repo" == "$rest" ]]; then
+    parse_scheme=""
+    parse_owner=""
+    parse_repo=""
+    return 1
+  fi
+  parse_repo="${parse_repo##*/}"
+  return 0
+}
+
+build_remote_url() {
+  local owner="$1" repo="$2" scheme="${3:-ssh}"
+  if [[ "$scheme" == "https" ]]; then
+    echo "https://github.com/${owner}/${repo}.git"
+  else
+    echo "git@github.com:${owner}/${repo}.git"
+  fi
+}
+
+normalize_remote_url() {
+  local u="$1"
+  u="${u%/}"
+  u="${u%.git}"
+  echo "$u"
+}
+
+urls_match() {
+  [[ -n "${1:-}" && -n "${2:-}" ]] || return 1
+  [[ "$(normalize_remote_url "$1")" == "$(normalize_remote_url "$2")" ]]
+}
+
+sanitize_remote_name() {
+  echo "$1" | sed 's/[^A-Za-z0-9._-]/-/g;s/--*/-/g;s/^-*//;s/-*$//'
+}
+
+parked_remote_name() {
+  local url="$1"
+  if [[ -n "$keep_origin_as" ]]; then
+    echo "$keep_origin_as"
+    return
+  fi
+  if parse_remote_url "$url" && [[ -n "$parse_owner" ]]; then
+    sanitize_remote_name "${parse_owner}-origin"
+    return
+  fi
+  echo "old-origin"
+}
+
+unique_parked_name() {
+  local base="$1"
+  local name="$base"
+  local existing=""
+  local n=2
+
+  if [[ -n "$keep_origin_as" ]]; then
+    existing="$(git remote get-url "$keep_origin_as" 2>/dev/null || true)"
+    if [[ -n "$existing" ]] && ! urls_match "$existing" "$current_origin"; then
+      die "Remote '${keep_origin_as}' already exists (${existing}). Choose a different --keep-origin-as."
+    fi
+    echo "$keep_origin_as"
+    return
+  fi
+
+  while git remote get-url "$name" >/dev/null 2>&1; do
+    existing="$(git remote get-url "$name")"
+    if urls_match "$existing" "$current_origin"; then
+      echo "$name"
+      return
+    fi
+    name="${base}-${n}"
+    n=$((n + 1))
+    if [[ "$n" -gt 20 ]]; then
+      die "Could not find a free remote name derived from ${base}"
+    fi
+  done
+  echo "$name"
+}
+
+classify_checkout() {
+  checkout_kind="none"
+  git_common_dir=""
+  git_dir=""
+  superproject=""
+  sub_path=""
+  sub_name=""
+  current_origin=""
+  origin_scheme="ssh"
+  worktree_count=0
+
+  if [[ "$(git rev-parse --is-bare-repository 2>/dev/null || echo false)" == "true" ]]; then
+    die "Bare repositories are not supported."
+  fi
+
+  if [[ -d .git || -f .git ]]; then
+    git_dir="$(git rev-parse --git-dir)"
+    git_common_dir="$(git rev-parse --git-common-dir)"
+    current_origin="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ -n "$current_origin" ]] && parse_remote_url "$current_origin"; then
+      origin_scheme="$parse_scheme"
+    else
+      local first_remote=""
+      first_remote="$(git remote 2>/dev/null | head -n 1 || true)"
+      if [[ -n "$first_remote" ]] && parse_remote_url "$(git remote get-url "$first_remote")"; then
+        origin_scheme="$parse_scheme"
+      fi
+    fi
+    worktree_count="$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ' || true)"
+    superproject="$(git rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+    if [[ -n "$superproject" ]]; then
+      checkout_kind="submodule"
+      local abs_pwd="" abs_super="" abs_candidate="" key="" path=""
+      abs_pwd="$(cd "$PWD" && pwd -P)"
+      abs_super="$(cd "$superproject" && pwd -P)"
+      sub_path="${abs_pwd#"${abs_super}"/}"
+      if [[ "$sub_path" == "$abs_pwd" ]]; then
+        sub_path=""
+      fi
+      if [[ -f "${superproject}/.gitmodules" ]]; then
+        while read -r key path; do
+          [[ -n "$path" ]] || continue
+          abs_candidate="$(cd "${superproject}/${path}" && pwd -P 2>/dev/null || true)"
+          if [[ -n "$abs_candidate" && "$abs_candidate" == "$abs_pwd" ]]; then
+            sub_path="$path"
+            sub_name="${key#submodule.}"
+            sub_name="${sub_name%.path}"
+            break
+          fi
+        done < <(git config -f "${superproject}/.gitmodules" --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+      fi
+    elif [[ -f .git && "$git_dir" != "$git_common_dir" ]]; then
+      checkout_kind="worktree"
+    elif [[ -f .git ]]; then
+      checkout_kind="worktree"
+    else
+      checkout_kind="repo"
+    fi
+    return
+  fi
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local toplevel=""
+    toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$toplevel" && "$toplevel" != "$PWD" ]]; then
+      checkout_kind="nested"
+      return
+    fi
+  fi
+
+  checkout_kind="none"
+}
+
+plan_origin_action() {
+  target_origin_url="$(build_remote_url "$org" "$repo_name" "$origin_scheme")"
+  planned_parked_name=""
+  origin_action="add"
+
+  case "$checkout_kind" in
+    none|nested)
+      origin_action="create"
+      return
+      ;;
+  esac
+
+  if [[ -z "$current_origin" ]]; then
+    origin_action="add"
+    return
+  fi
+
+  if urls_match "$current_origin" "$target_origin_url"; then
+    origin_action="noop"
+    return
+  fi
+
+  origin_action="swap"
+  planned_parked_name="$(unique_parked_name "$(parked_remote_name "$current_origin")")"
+}
+
+print_origin_plan() {
+  info "Checkout:    ${checkout_kind}"
+  [[ "$worktree_count" -gt 0 ]] && info "Worktrees:   ${worktree_count}"
+  if [[ "$checkout_kind" == "submodule" ]]; then
+    info "Super:       ${superproject}"
+    info "Sub path:    ${sub_path}${sub_name:+ (${sub_name})}"
+  fi
+  if [[ -n "$current_origin" ]]; then
+    info "Origin now:  ${current_origin}"
+  else
+    info "Origin now:  (none)"
+  fi
+  info "Origin after: ${target_origin_url}"
+  case "$origin_action" in
+    create) info "Origin plan: init + create (gh --source --push)" ;;
+    add)    info "Origin plan: add origin" ;;
+    swap)   info "Origin plan: swap (park as ${planned_parked_name})" ;;
+    noop)   info "Origin plan: already matches" ;;
+  esac
+}
+
+confirm_swap_origin() {
+  [[ "$origin_action" == "swap" ]] || return 0
+  if [[ "$swap_origin" == true ]]; then
+    return 0
+  fi
+  if [[ "$auto_confirm" == true ]]; then
+    die "Local origin already points at ${current_origin}. Re-run with --swap-origin to park it as ${planned_parked_name} and set origin to ${target_origin_url}."
+  fi
+  echo ""
+  warn "Swap origin?"
+  echo -e "  ${BOLD}from:${NC} ${CYN}${current_origin}${NC}"
+  echo -e "  ${BOLD}to:${NC}   ${CYN}${target_origin_url}${NC}"
+  echo -e "  ${BOLD}park:${NC} ${CYN}${planned_parked_name}${NC}"
+  local ans=""
+  read -rp "  Swap origin? [y/N] " ans
+  if [[ ! "$ans" =~ ^[yY](es)?$ ]]; then
+    die "Aborted — origin unchanged."
+  fi
+}
+
+apply_origin() {
+  [[ "$used_source_push" == true ]] && return 0
+  case "$origin_action" in
+    noop|create)
+      return 0
+      ;;
+    add)
+      if git remote get-url origin >/dev/null 2>&1; then
+        git remote set-url origin "$target_origin_url"
+      else
+        git remote add origin "$target_origin_url"
+      fi
+      ok "origin → ${target_origin_url}"
+      ;;
+    swap)
+      local parked_url=""
+      parked_url="$(git remote get-url "$planned_parked_name" 2>/dev/null || true)"
+      if [[ -n "$parked_url" ]] && urls_match "$parked_url" "$current_origin"; then
+        git remote set-url origin "$target_origin_url"
+        ok "origin → ${target_origin_url} (previous already parked as ${planned_parked_name})"
+      else
+        git remote rename origin "$planned_parked_name"
+        ok "Renamed origin → ${planned_parked_name}"
+        git remote add origin "$target_origin_url"
+        ok "Added origin → ${target_origin_url}"
+      fi
+      ;;
+  esac
+}
+
+sync_worktree_origin_overrides() {
+  [[ "$checkout_kind" == "none" || "$checkout_kind" == "nested" ]] && return 0
+  [[ "$origin_action" == "noop" || "$origin_action" == "create" ]] && return 0
+
+  local wt="" gitdir="" override="" got=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt="${line#worktree }"
+        ;;
+      gitdir\ *)
+        gitdir="${line#gitdir }"
+        if [[ -f "${gitdir}/config" ]]; then
+          override="$(git config -f "${gitdir}/config" --get remote.origin.url 2>/dev/null || true)"
+          if [[ -n "$override" ]] && ! urls_match "$override" "$target_origin_url"; then
+            warn "Per-worktree origin override in ${gitdir}/config"
+            git config -f "${gitdir}/config" remote.origin.url "$target_origin_url"
+            ok "Updated worktree override: ${wt}"
+          fi
+        fi
+        if [[ -n "$wt" && -d "$wt" ]]; then
+          got="$(git -C "$wt" remote get-url origin 2>/dev/null || true)"
+          if [[ -n "$got" ]] && ! urls_match "$got" "$target_origin_url"; then
+            warn "Worktree ${wt} origin is ${got} (expected ${target_origin_url})"
+          fi
+        fi
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null || true)
+}
+
+sync_submodule_recorded_url() {
+  [[ "$checkout_kind" == "submodule" ]] || return 0
+  if [[ -z "$superproject" || -z "$sub_path" ]]; then
+    warn "Could not locate superproject for submodule URL sync."
+    return 0
+  fi
+  local gm="${superproject}/.gitmodules"
+  if [[ ! -f "$gm" ]]; then
+    warn "No .gitmodules in ${superproject}; skipped recorded-url sync."
+    return 0
+  fi
+  if [[ -z "$sub_name" ]]; then
+    warn "Could not match ${sub_path} in .gitmodules; skipped recorded-url sync."
+    return 0
+  fi
+
+  if ! git -C "$superproject" diff --quiet -- .gitmodules 2>/dev/null \
+      || ! git -C "$superproject" diff --cached --quiet -- .gitmodules 2>/dev/null; then
+    warn ".gitmodules already has uncommitted changes."
+    if [[ "$auto_confirm" == true ]]; then
+      die "Refusing to edit dirty .gitmodules under --yes. Commit or stash parent changes first."
+    fi
+    local ans=""
+    read -rp "  Edit submodule.${sub_name}.url on a dirty .gitmodules anyway? [y/N] " ans
+    [[ "$ans" =~ ^[yY](es)?$ ]] || die "Aborted: dirty .gitmodules."
+  fi
+
+  local old_url=""
+  old_url="$(git config -f "$gm" --get "submodule.${sub_name}.url" 2>/dev/null || true)"
+  if [[ "$old_url" == ../* || "$old_url" == ./* ]]; then
+    warn "Replacing relative submodule URL (${old_url}) with ${target_origin_url}"
+  fi
+  git config -f "$gm" "submodule.${sub_name}.url" "$target_origin_url"
+  ok "Updated ${gm} submodule.${sub_name}.url"
+
+  git -C "$superproject" submodule sync -- "$sub_path" >/dev/null 2>&1 || \
+    git -C "$superproject" submodule sync -- "$sub_path" || \
+    warn "git submodule sync failed in ${superproject}"
+
+  local pwt=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        pwt="${line#worktree }"
+        [[ "$pwt" == "$superproject" ]] && continue
+        if [[ -e "${pwt}/${sub_path}/.git" || -d "${pwt}/${sub_path}" ]]; then
+          git -C "$pwt" submodule sync -- "$sub_path" >/dev/null 2>&1 || \
+            warn "Could not submodule sync in parent worktree ${pwt}"
+        fi
+        info "Other parent worktree will not see .gitmodules until commit + checkout: ${pwt}"
+        ;;
+    esac
+  done < <(git -C "$superproject" worktree list --porcelain 2>/dev/null || true)
+
+  info "Parent .gitmodules updated (not committed):"
+  info "  git -C ${superproject} add .gitmodules && git -C ${superproject} commit -m \"update submodule url for ${sub_path}\""
+}
+
+ensure_github_repo() {
+  if gh repo view "$full_name" >/dev/null 2>&1; then
+    github_existed=true
+    ok "GitHub repo exists: ${full_name}"
+    return 0
+  fi
+
+  step "Creating GitHub repo: ${full_name}"
+  local visibility_flag="--${visibility}"
+  # --source/--push lets gh mutate remotes. Use it only for a brand-new
+  # nested/empty checkout. Existing repos (including after a swap) get a
+  # remote-only create; we wire origin ourselves.
+  if [[ "$checkout_kind" == "repo" || "$checkout_kind" == "worktree" || "$checkout_kind" == "submodule" ]] \
+      || git remote get-url origin >/dev/null 2>&1; then
+    gh repo create "$full_name" \
+      "$visibility_flag" \
+      --description "$description"
+  else
+    gh repo create "$full_name" \
+      --source=. \
+      --push \
+      "$visibility_flag" \
+      --description "$description"
+    used_source_push=true
+  fi
+  ok "Repo created: ${full_name}"
+}
+
+safe_push() {
+  [[ "$used_source_push" == true ]] && return 0
+  if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+    warn "No commits yet — skipping push."
+    return 0
+  fi
+
+  local branch=""
+  branch="$(git branch --show-current 2>/dev/null || true)"
+  step "Fetching origin"
+  if ! git fetch origin >/dev/null 2>&1; then
+    warn "git fetch origin failed — remotes are configured; push skipped."
+    return 0
+  fi
+
+  if [[ -z "$branch" ]]; then
+    warn "Detached HEAD — skipping upstream setup and push."
+    return 0
+  fi
+
+  local remote_ref="origin/${branch}"
+  if git rev-parse --verify "$remote_ref" >/dev/null 2>&1; then
+    if git merge-base --is-ancestor HEAD "$remote_ref" 2>/dev/null; then
+      if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "$remote_ref")" ]]; then
+        git branch --set-upstream-to="$remote_ref" "$branch" 2>/dev/null || true
+        ok "Already up to date with ${remote_ref}"
+        return 0
+      fi
+      warn "Local HEAD is behind ${remote_ref} — not pushing. Pull/rebase first."
+      return 0
+    fi
+    if git merge-base --is-ancestor "$remote_ref" HEAD 2>/dev/null; then
+      git push -u origin "$branch"
+      ok "Pushed ${branch} → origin (fast-forward)"
+      git branch --set-upstream-to="$remote_ref" "$branch" 2>/dev/null || true
+      return 0
+    fi
+    warn "Histories have diverged — remotes configured, not force-pushing."
+    info "Manual option (unrelated histories): git pull origin ${branch} --allow-unrelated-histories"
+    return 0
+  fi
+
+  git push -u origin "$branch"
+  ok "Pushed ${branch} → origin (new branch)"
+}
+
+print_remotes() {
+  echo ""
+  info "Remotes:"
+  git remote -v 2>/dev/null | sed 's/^/    /' || true
+}
+
 # --- Preflight checks --------------------------------------------------------
 command -v gh >/dev/null 2>&1 || die "gh CLI not found — install with: brew install gh"
 gh auth status >/dev/null 2>&1 || die "Not authenticated — run: gh auth login"
@@ -447,13 +934,12 @@ apply_edits() {
   fi
 
   if [[ "$changes_made" == false ]]; then
-    info "No changes to apply."
+    info "No GitHub setting changes to apply."
   else
     echo ""
-    ok "Done! ${full_name}"
+    ok "GitHub settings updated: ${full_name}"
   fi
   info "URL: https://github.com/${full_name}"
-  exit 0
 }
 
 # --- Submodule self-detection: use the submodule's own remote ----------------
@@ -484,12 +970,19 @@ if [[ -f .git && -z "$cli_org" && -z "$cli_repo_name" ]]; then
   fi
 fi
 
+# --- Classify local checkout (needed for --origin and already-exists hints) --
+classify_checkout
+plan_origin_action
+
 # --- Auto-enter edit mode for existing repos when visibility flag is set -----
-if [[ "$edit_mode" == false ]] && gh repo view "$full_name" >/dev/null 2>&1; then
+if gh repo view "$full_name" >/dev/null 2>&1; then
+  github_existed=true
+fi
+if [[ "$edit_mode" == false && "$github_existed" == true ]]; then
   if [[ -n "$cli_visibility" ]]; then
     edit_mode=true
-  else
-    die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it."
+  elif [[ "$origin_mode" != true ]]; then
+    die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it, or --origin to bind/swap remotes."
   fi
 fi
 
@@ -510,6 +1003,9 @@ if [[ "$edit_mode" == true ]]; then
   fi
 
   apply_edits
+  if [[ "$origin_mode" != true ]]; then
+    exit 0
+  fi
 fi
 
 # --- Confirmation prompt -----------------------------------------------------
@@ -537,6 +1033,19 @@ confirm_and_edit() {
     if [[ "$parent_detected" == true ]]; then
       echo -e "  ${CYN}    Inherited:  org=${parent_org}${parent_visibility:+, visibility=${parent_visibility}} (from parent repo)${NC}"
     fi
+    if [[ "$origin_mode" == true ]]; then
+      echo ""
+      echo -e "  ${CYN}    Checkout:    ${checkout_kind}${NC}"
+      if [[ -n "$current_origin" ]]; then
+        echo -e "  ${CYN}    Origin now:  ${current_origin}${NC}"
+      else
+        echo -e "  ${CYN}    Origin now:  (none)${NC}"
+      fi
+      echo -e "  ${CYN}    Origin after: ${target_origin_url}${NC}"
+      if [[ "$origin_action" == "swap" ]]; then
+        echo -e "  ${YEL}    Park old as: ${planned_parked_name}${NC}"
+      fi
+    fi
     echo ""
     if [[ "$repo_exists" == true ]]; then
       echo -e "  ${BOLD}[y]${NC} Apply changes"
@@ -561,12 +1070,14 @@ confirm_and_edit() {
         [[ -n "$new_val" ]] && org="$new_val"
         repo_exists=false
         gh repo view "${org}/${repo_name}" >/dev/null 2>&1 && repo_exists=true
+        plan_origin_action
         ;;
       2)
         read -rp "  Repo name [${repo_name}]: " new_val
         [[ -n "$new_val" ]] && repo_name="$new_val"
         repo_exists=false
         gh repo view "${org}/${repo_name}" >/dev/null 2>&1 && repo_exists=true
+        plan_origin_action
         ;;
       3)
         info "Edit org [1] or repo name [2] individually."
@@ -619,13 +1130,18 @@ if [[ "$dry_run" == true ]]; then
       submodule) info "Parent:      will integrate ${subdir_relpath} as a submodule" ;;
       none)      info "Parent:      no integration" ;;
       ask)
-        if [[ "$auto_confirm" == true ]]; then
+        if [[ "$origin_mode" == true ]]; then
+          info "Parent:      no integration (--origin default; pass --subtree/--submodule to convert)"
+        elif [[ "$auto_confirm" == true ]]; then
           info "Parent:      no integration (--yes default)"
         else
           info "Parent:      prompt after creation (default: no integration)"
         fi
         ;;
     esac
+  fi
+  if [[ "$origin_mode" == true ]]; then
+    print_origin_plan
   fi
   warn "Dry run — no changes made."
   exit 0
@@ -635,16 +1151,31 @@ if [[ "$auto_confirm" == false ]]; then
   confirm_and_edit
 fi
 full_name="${org}/${repo_name}"
+plan_origin_action
 
 # Re-check after edits — auto-enter edit mode if visibility was explicitly set
 if gh repo view "$full_name" >/dev/null 2>&1; then
-  if [[ -n "$cli_visibility" ]]; then
-    current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
-    current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
-    [[ -z "$cli_description" ]] && description="${current_desc}"
-    apply_edits
+  github_existed=true
+  if [[ "$origin_mode" != true ]]; then
+    if [[ -n "$cli_visibility" ]]; then
+      current_vis="$(gh repo view "$full_name" --json visibility -q '.visibility' 2>/dev/null || echo "unknown")"
+      current_desc="$(gh repo view "$full_name" --json description -q '.description' 2>/dev/null || echo "")"
+      [[ -z "$cli_description" ]] && description="${current_desc}"
+      apply_edits
+    fi
+    die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it, or --origin to bind/swap remotes."
   fi
-  die "Repo ${full_name} already exists on GitHub. Use --edit, --public, or --private to modify it."
+fi
+
+if [[ "$origin_mode" != true ]] && [[ -d .git || -f .git ]]; then
+  local_origin_hint="$(git remote get-url origin 2>/dev/null || true)"
+  if [[ -n "$local_origin_hint" ]]; then
+    die "Local origin already set (${local_origin_hint}). Re-run with --origin to swap/bind remotes."
+  fi
+fi
+
+if [[ "$origin_mode" == true ]]; then
+  confirm_swap_origin
 fi
 
 # --- Track original state for submodule conversion ---------------------------
@@ -652,7 +1183,21 @@ orig_was_submodule=false
 [[ -f .git ]] && orig_was_submodule=true
 
 # --- Init local git if needed ------------------------------------------------
-if [[ ! -d .git && ! -f .git ]]; then
+if [[ "$origin_mode" == true ]]; then
+  if [[ "$checkout_kind" == "none" || "$checkout_kind" == "nested" ]]; then
+    step "Initializing git repo"
+    git init
+    if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+      git add .
+      git commit -m "initial commit" --allow-empty
+    fi
+    ok "Local repo initialized"
+    classify_checkout
+    plan_origin_action
+  elif [[ "$checkout_kind" == "submodule" ]]; then
+    info "Keeping submodule checkout (not detaching)"
+  fi
+elif [[ ! -d .git && ! -f .git ]]; then
   step "Initializing git repo"
   git init
   git add .
@@ -668,17 +1213,28 @@ elif [[ -f .git ]]; then
   ok "Detached from parent, standalone repo initialized"
 fi
 
-# --- Create the GitHub repo --------------------------------------------------
-step "Creating GitHub repo: ${full_name}"
+# --- Create the GitHub repo / bind origin ------------------------------------
+if [[ "$origin_mode" == true ]]; then
+  ensure_github_repo
+  apply_origin
+  if [[ "$used_source_push" != true ]]; then
+    sync_worktree_origin_overrides
+    safe_push
+  fi
+  sync_submodule_recorded_url
+  print_remotes
+else
+  step "Creating GitHub repo: ${full_name}"
 
-visibility_flag="--${visibility}"
-gh repo create "$full_name" \
-  --source=. \
-  --push \
-  "$visibility_flag" \
-  --description "$description"
+  visibility_flag="--${visibility}"
+  gh repo create "$full_name" \
+    --source=. \
+    --push \
+    "$visibility_flag" \
+    --description "$description"
 
-ok "Repo created and pushed: ${full_name}"
+  ok "Repo created and pushed: ${full_name}"
+fi
 
 # --- Grant team access -------------------------------------------------------
 if [[ -n "$groups" ]]; then
@@ -990,6 +1546,9 @@ convert_to_submodule() {
   cd "$target_dir"
 }
 
+if [[ "$origin_mode" == true && "$integration_mode" == "ask" ]]; then
+  integration_mode="none"
+fi
 choose_parent_integration
 case "$integration_mode" in
   subtree)   convert_to_subtree ;;

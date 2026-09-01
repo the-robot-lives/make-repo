@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- `make-repo --origin` (`-origin`): bind or swap `origin` on existing git repos, linked worktrees, and submodules. Parks a different existing `origin` as `{owner}-origin` (override with `--keep-origin-as`). Headless swap requires `--swap-origin`.
+- Submodule path updates the superproject `.gitmodules` URL and runs `git submodule sync` (not auto-committed). Worktree remotes are the shared config; per-worktree origin overrides are patched.
+- Fake-`gh` integration tests covering origin add/swap/decline/collision/attach, submodule `.gitmodules` updates, worktree sharing, dry-run, and the existing-GitHub die path.
 - Fake-`gh` integration tests covering the default, subtree, submodule, dry-run, `--no-inherit`, and conflicting-flag paths.
 
 ### Changed

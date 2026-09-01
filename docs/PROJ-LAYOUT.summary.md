@@ -8,7 +8,7 @@ make-repo/
 │   ├── make-repo               # create/edit GitHub repos (gh wrapper)
 │   └── fork-repo               # fork + configure remotes
 ├── tests/
-│   └── run.sh                  # fake-gh parent integration tests
+│   └── run.sh                  # fake-gh parent integration + origin-mode tests
 ├── docs/
 │   ├── PROJ-ARCH*(.summary)    # architecture
 │   ├── PROJ-LAYOUT*(.summary)  # this map

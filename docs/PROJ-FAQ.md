@@ -42,6 +42,8 @@ When you have not first confirmed the resolved values with `--dry-run`. `--yes` 
 
 They cover opposite starting points: `make-repo` creates a brand-new GitHub repo from a directory you already have; `fork-repo` forks an *existing* GitHub repo (yours or someone else's) and wires local remotes so `origin` points at your fork and `upstream` at the source. Both share the same precedence-resolution and interactive-confirm/`--dry-run` conventions, but `fork-repo` has no parent-integration behavior and no team-access granting — those are `make-repo`-only concerns.
 
+`make-repo --origin` is the non-fork analogue of `fork-repo`'s remote rewiring: it binds or swaps `origin` without creating a fork, and parks the previous remote as `{owner}-origin` rather than `upstream`.
+
 → *See [PROJ-ARCH.md](PROJ-ARCH.md#fork-repo-flow).*
 
 ### How does `--no-inherit` differ from the parent-integration flags?
@@ -77,6 +79,10 @@ Yes, via `--groups`/`GH_NEW_REPO_GROUPS[_OVERRIDE]`, both on creation and throug
 It's recoverable but manual. Before the destructive `git submodule add`, the tool backs up the original directory to `copy.<dirname>` in the parent repo and verifies file-for-file that the new submodule matches the backup — so nothing is lost, but undoing requires you to run `git submodule deinit`/`git rm`/`rm -rf .git/modules/<path>` yourself and restore from the `copy.*` backup. Don't delete that backup until you've confirmed the restored state is correct.
 
 → *Full discussion: [howto/avoid-submodule-conversion.md](howto/avoid-submodule-conversion.md)*
+
+### Does `--origin` rewrite my worktree `.git` files?
+
+No. Linked worktree and submodule `.git` files only contain a `gitdir:` pointer. Remotes live in the common git config (`git remote rename` / `add` is enough for every worktree of this repo). The extra writes are: rare per-worktree `remote.origin.url` overrides, the superproject `.gitmodules` URL, and `git submodule sync` (including other parent worktrees that have their own module git dir).
 
 ### What are the risks of running `fork-repo` inside a submodule?
 

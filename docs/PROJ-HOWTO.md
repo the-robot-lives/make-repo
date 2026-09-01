@@ -130,6 +130,35 @@ fork-repo --help
 
 ---
 
+## How to: bind or swap origin on an existing checkout
+
+**Goal:** point this directory's `origin` at a GitHub repo (creating it if needed) without destroying submodule metadata or force-pushing.
+**Prereqs:** installed; `gh auth login` done.
+
+1. Preview:
+   ```bash
+   make-repo --origin --dry-run
+   ```
+2. No origin yet:
+   ```bash
+   make-repo --origin --yes
+   ```
+3. Origin exists and should be replaced. Interactive run asks "Swap origin?". For scripts:
+   ```bash
+   make-repo --origin --yes --swap-origin
+   ```
+   The previous `origin` is renamed to `{github-owner}-origin` (or `--keep-origin-as NAME`).
+
+**Verify:** `git remote -v` shows the new `origin` and, on swap, the parked remote. For a submodule, `git config -f ../.gitmodules --get submodule.<name>.url` matches; the parent `.gitmodules` change is **not** committed automatically.
+
+**Gotchas:**
+- `--yes` alone will not swap a different existing origin — that is deliberate. Pass `--swap-origin`.
+- Worktree `.git` files are not edited; remotes live in the shared config, so every linked worktree sees the new `origin`.
+- Histories that have diverged are left as-is (no force-push).
+- Parent subtree/submodule conversion is not offered unless you also pass `--subtree` or `--submodule`.
+
+---
+
 ## How to: pin values that beat parent-repo detection
 
 **Goal:** force an org, prefix, name, description, or visibility even when `make-repo` would otherwise inherit it from a containing repo.
