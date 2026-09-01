@@ -10,12 +10,13 @@ Plain tree: [`PROJ-LAYOUT.summary.md`](PROJ-LAYOUT.summary.md). Arch: [`PROJ-ARC
 ```
 make-repo/
 ├── bin/                            # CLIs installed to ~/.local/bin
-│   ├── make-repo                   #   Create/edit GitHub repos (~995 lines bash)
+│   ├── make-repo                   #   Create/edit GitHub repos (~1560 lines bash)
 │   └── fork-repo                   #   Fork + rewire origin/upstream (~432 lines bash)
 ├── tests/
 │   └── run.sh                      #   Isolated fake-gh integration suite
 ├── docs/
 │   ├── PROJ-ARCH.md(+.summary)     #   Architecture + flow diagrams
+│   ├── PROJ-SCHEMA.md(+.summary)   #   Data artifacts: env vars, flags, git files (no DB)
 │   ├── PROJ-LAYOUT.md(+.summary)   #   This file + tree-only companion
 │   ├── PROJ-HOWTO.md(+.summary)    #   Task guides (install, create, fork, edit)
 │   ├── PROJ-FAQ.md(+.summary)      #   Common questions

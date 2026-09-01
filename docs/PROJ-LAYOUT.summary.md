@@ -11,6 +11,7 @@ make-repo/
 │   └── run.sh                  # fake-gh parent integration + origin-mode tests
 ├── docs/
 │   ├── PROJ-ARCH*(.summary)    # architecture
+│   ├── PROJ-SCHEMA*(.summary)  # data artifacts (env/flags/git; no DB)
 │   ├── PROJ-LAYOUT*(.summary)  # this map
 │   ├── PROJ-HOWTO*(.summary)   # task guides
 │   ├── PROJ-FAQ*(.summary)     # FAQ
