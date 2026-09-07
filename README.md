@@ -1,6 +1,16 @@
 # make-repo
 
+**Repo:** https://github.com/the-robot-lives/make-repo
+
 Create a GitHub repo from the current directory and push it — with sensible defaults, parent repo inheritance, and an interactive confirmation step. After creation, directories inside a parent repo can optionally be registered as a subtree or submodule; the default is to leave the parent unchanged.
+
+## What
+
+A single bash CLI (`bin/make-repo`) that wraps `gh` to create, edit, and wire up GitHub repositories, including binding `origin` on existing checkouts, worktrees, and submodules. Part of the Noizu utilities fleet (`Portfolio/Utilities/`); also installed via the monorepo root `make install-utilities`.
+
+## Why
+
+Spinning up a new portfolio repo by hand means remembering org, visibility, team grants, remote wiring, and submodule registration every time. make-repo encodes those defaults, inherits org/visibility from the containing repo, and makes parent integration (subtree/submodule) an explicit, opt-in step — so scripted and interactive flows both stay safe.
 
 ## Install
 
