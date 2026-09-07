@@ -6,7 +6,7 @@
 
 | Tool | Path | Role |
 |------|------|------|
-| `make-repo` | `bin/make-repo` (~999 lines) | Create or edit a GitHub repo from the cwd; optional parent-repo inheritance and post-create subtree/submodule integration |
+| `make-repo` | `bin/make-repo` (~1560 lines) | Create or edit a GitHub repo from the cwd; optional parent-repo inheritance and post-create subtree/submodule integration |
 | `fork-repo` | `bin/fork-repo` (~436 lines) | Fork a repo and rewire remotes (`origin` / `upstream`), preserving ssh vs https |
 
 Both scripts are self-contained (`set -euo pipefail`). They do **not** source monorepo `share/k8-lib` or any package `lib/` — only `bash`, `git`, and authenticated `gh` at runtime. Install via `make install` → `~/.local/bin` (or monorepo `make install-utilities`).
@@ -194,6 +194,7 @@ Submodule: edit current superproject `.gitmodules`, `git submodule sync -- <path
 ## Related docs
 
 - Layout: [`PROJ-LAYOUT.md`](PROJ-LAYOUT.md)
+- Data artifacts (env/flags/git; no DB): [`PROJ-SCHEMA.md`](PROJ-SCHEMA.md)
 - Tasks: [`PROJ-HOWTO.md`](PROJ-HOWTO.md), [`howto/avoid-submodule-conversion.md`](howto/avoid-submodule-conversion.md)
 - FAQ: [`PROJ-FAQ.md`](PROJ-FAQ.md)
 - User-facing flags/env: [`../README.md`](../README.md)
