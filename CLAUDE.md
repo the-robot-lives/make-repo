@@ -1,5 +1,7 @@
 # CLAUDE.md — make-repo
 
+〚📁:29372459-3eb9-5765-bffa-788bd801ad3a〛 make-repo CLAUDE.md :: Agent guidance for Claude Code: worktree convention, develop-targeted PRs
+
 Create a GitHub repo from the current directory and push it — with sensible defaults, parent repo inheritance, and an interactive confirmation step. After creation, directories inside a parent repo can optionally be registered as a subtree or submodule; the default is to leave the parent unchanged.
 
 Monorepo path: `Portfolio/Utilities/make-repo` (trl-infra). Monorepo ops → `../../../CLAUDE.md`.

@@ -1,5 +1,7 @@
 # Project Schema
 
+〚📁:ca23b131-2fef-5272-9806-77ccc7b192e5〛 make-repo PROJ-SCHEMA :: Data artifacts reference: env vars, CLI flag grammar, git-managed files (no DB)
+
 > **No persistence layer.** This project has **no database, no SQL schema, no ORM, and no
 > migrations**. It is two stateless Bash CLIs (`bin/make-repo`, `bin/fork-repo`) that wrap
 > `gh` and `git`. There are no Liquibase changelogs and no ERDs to maintain — the

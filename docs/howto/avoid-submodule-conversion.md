@@ -1,5 +1,7 @@
 # How to: choose parent integration after creating a repo
 
+〚📁:d1424b3d-1d57-5881-8b14-dc48e2d9c6ac〛 make-repo avoid-submodule-conversion :: When and how to choose parent integration: none, subtree, or submodule
+
 **Goal:** publish a project directory inside this monorepo and intentionally keep it unchanged, register it as a subtree, or convert it to a submodule.
 
 **Prereqs:** installed (`make install`); standing inside the project directory you want to publish.

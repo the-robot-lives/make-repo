@@ -1,5 +1,7 @@
 # PROJ-FAQ
 
+〚📁:67b7e528-6160-5690-83ae-f3bcf8603a77〛 make-repo PROJ-FAQ :: Common questions about repo creation, inheritance, and parent integration
+
 Anticipated why/when/compared-to-what questions for `make-repo`/`fork-repo`. See [PROJ-HOWTO.md](PROJ-HOWTO.md) for step-by-step procedures and [PROJ-ARCH.md](PROJ-ARCH.md) for design rationale.
 
 ## Motivation

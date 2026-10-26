@@ -1,5 +1,7 @@
 # make-repo
 
+〚📁:925963f3-700a-5231-8be3-18854bbf3d46〛 make-repo README :: Entry point: install, flags, env vars, examples
+
 **Repo:** https://github.com/the-robot-lives/make-repo
 
 Create a GitHub repo from the current directory and push it — with sensible defaults, parent repo inheritance, and an interactive confirmation step. After creation, directories inside a parent repo can optionally be registered as a subtree or submodule; the default is to leave the parent unchanged.

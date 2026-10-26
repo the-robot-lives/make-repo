@@ -1,5 +1,7 @@
 # Threat Model
 
+〚📁:aae44029-3c57-5ac2-ad2b-afeaa316fdb7〛 make-repo THREAT-MODEL :: Attack surface, trust boundaries, and T-001..T-012 risk register
+
 ## Overview
 
 `make-repo` / `fork-repo` are operator-run Bash CLIs executed on a developer workstation.

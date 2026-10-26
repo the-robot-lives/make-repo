@@ -1,0 +1,122 @@
+---
+pointers:
+  29372459-3eb9-5765-bffa-788bd801ad3a:
+    created_at: 2026-10-26T21:59:56.768998Z
+    description: 'Agent guidance for Claude Code: worktree convention, develop-targeted PRs'
+    file_path: CLAUDE.md
+    function: make-repo CLAUDE.md
+    kind: file
+    line: 3
+    locations:
+      - file_path: CLAUDE.md
+        line: 3
+    token: 𔕛𔅦𓵋𓭺
+    updated_at: 2026-10-26T21:59:56.768998Z
+  2a0c01cf-c4b1-5301-b5ff-02be8da78ff0:
+    created_at: 2026-10-26T21:59:56.768972Z
+    description: Agent guidance for Codex/Grok/Cursor harnesses (AGENTS.md sibling)
+    file_path: AGENT.md
+    function: make-repo AGENT.md
+    kind: file
+    line: 3
+    locations:
+      - file_path: AGENT.md
+        line: 3
+    token: 𓡟𓵕𓻖𔁠
+    updated_at: 2026-10-26T21:59:56.768972Z
+  67b7e528-6160-5690-83ae-f3bcf8603a77:
+    created_at: 2026-10-26T21:59:56.768981Z
+    description: Common questions about repo creation, inheritance, and parent integration
+    file_path: docs/PROJ-FAQ.md
+    function: make-repo PROJ-FAQ
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/PROJ-FAQ.md
+        line: 3
+    token: 𓨝𓎆𓁠𓲇
+    updated_at: 2026-10-26T21:59:56.768981Z
+  8b9e158d-2e9a-5ba5-8c8d-5ad4250f6e6e:
+    created_at: 2026-10-26T21:59:56.768995Z
+    description: 'Task guides: install, create, fork, edit, origin binding'
+    file_path: docs/PROJ-HOWTO.md
+    function: make-repo PROJ-HOWTO
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/PROJ-HOWTO.md
+        line: 3
+    token: 𓾩𓗒𓳘𔓾
+    updated_at: 2026-10-26T21:59:56.768995Z
+  925963f3-700a-5231-8be3-18854bbf3d46:
+    created_at: 2026-10-26T21:59:56.768991Z
+    description: 'Entry point: install, flags, env vars, examples'
+    file_path: README.md
+    function: make-repo README
+    kind: file
+    line: 3
+    locations:
+      - file_path: README.md
+        line: 3
+    token: 𓶔𓐏𓎲𓙶
+    updated_at: 2026-10-26T21:59:56.768991Z
+  a9b1282a-0b03-5450-aefb-1962cde5dc33:
+    created_at: 2026-10-26T21:59:56.768968Z
+    description: 'Architecture overview: make-repo and fork-repo flows, components, design decisions'
+    file_path: docs/PROJ-ARCH.md
+    function: make-repo PROJ-ARCH
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/PROJ-ARCH.md
+        line: 3
+    token: 𓗉𔍧𓇧𓠳
+    updated_at: 2026-10-26T21:59:56.768968Z
+  aae44029-3c57-5ac2-ad2b-afeaa316fdb7:
+    created_at: 2026-10-26T21:59:56.768984Z
+    description: Attack surface, trust boundaries, and T-001..T-012 risk register
+    file_path: docs/THREAT-MODEL.md
+    function: make-repo THREAT-MODEL
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/THREAT-MODEL.md
+        line: 3
+    token: 𓫑𔖚𓾰𓷇
+    updated_at: 2026-10-26T21:59:56.768984Z
+  c3ff4a05-4c38-5ae1-bf0a-87225b6da276:
+    created_at: 2026-10-26T21:59:56.768988Z
+    description: 'Repository layout map: bin/, tests/, docs/, agent guidance files'
+    file_path: docs/PROJ-LAYOUT.md
+    function: make-repo PROJ-LAYOUT
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/PROJ-LAYOUT.md
+        line: 3
+    token: 𓳾𓛓𓏾𓹦
+    updated_at: 2026-10-26T21:59:56.768988Z
+  ca23b131-2fef-5272-9806-77ccc7b192e5:
+    created_at: 2026-10-26T21:59:56.768964Z
+    description: 'Data artifacts reference: env vars, CLI flag grammar, git-managed files (no DB)'
+    file_path: docs/PROJ-SCHEMA.md
+    function: make-repo PROJ-SCHEMA
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/PROJ-SCHEMA.md
+        line: 3
+    token: 𓓔𓦗𓸾𔏕
+    updated_at: 2026-10-26T21:59:56.768964Z
+  d1424b3d-1d57-5881-8b14-dc48e2d9c6ac:
+    created_at: 2026-10-26T21:59:56.768946Z
+    description: 'When and how to choose parent integration: none, subtree, or submodule'
+    file_path: docs/howto/avoid-submodule-conversion.md
+    function: make-repo avoid-submodule-conversion
+    kind: file
+    line: 3
+    locations:
+      - file_path: docs/howto/avoid-submodule-conversion.md
+        line: 3
+    token: 𓊁𓇖𓠵𓉜
+    updated_at: 2026-10-26T21:59:56.768946Z

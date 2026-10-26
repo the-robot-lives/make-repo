@@ -1,5 +1,7 @@
 # Project Layout
 
+〚📁:c3ff4a05-4c38-5ae1-bf0a-87225b6da276〛 make-repo PROJ-LAYOUT :: Repository layout map: bin/, tests/, docs/, agent guidance files
+
 Terminal utility package: create/edit GitHub repos (`make-repo`) and fork with remote
 rewiring (`fork-repo`). Two self-contained Bash scripts wrapping `gh`/`git` — no
 `k8-lib`, no `lib/`. Install to `~/.local/bin` via `make install` (or monorepo
