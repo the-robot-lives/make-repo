@@ -1,5 +1,7 @@
 # PROJ-HOWTO
 
+〚📁:8b9e158d-2e9a-5ba5-8c8d-5ad4250f6e6e〛 make-repo PROJ-HOWTO :: Task guides: install, create, fork, edit, origin binding
+
 Task-oriented guides for `make-repo`/`fork-repo`. See [PROJ-ARCH.md](PROJ-ARCH.md) for *why*, [PROJ-LAYOUT.md](PROJ-LAYOUT.md) for *where*.
 
 ## How to: install the tools

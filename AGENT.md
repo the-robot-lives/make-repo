@@ -1,5 +1,7 @@
 # AGENT.md — make-repo
 
+〚📁:2a0c01cf-c4b1-5301-b5ff-02be8da78ff0〛 make-repo AGENT.md :: Agent guidance for Codex/Grok/Cursor harnesses (AGENTS.md sibling)
+
 Guidance for **Codex**, **Grok**, **Cursor**, and other `AGENTS.md` / `AGENT.md` tools.
 
 Claude Code loads [CLAUDE.md](./CLAUDE.md). Same policy; this file is the harness-shaped sibling (numbered MUST first, markdown headings). If both this file and a parent `AGENTS.md` load, **this file wins on conflict**.

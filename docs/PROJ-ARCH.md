@@ -1,5 +1,7 @@
 # Project Architecture
 
+〚📁:a9b1282a-0b03-5450-aefb-1962cde5dc33〛 make-repo PROJ-ARCH :: Architecture overview: make-repo and fork-repo flows, components, design decisions
+
 ## Overview
 
 `make-repo` is a two-tool Bash CLI package wrapping GitHub CLI (`gh`) and `git`:
