@@ -4,6 +4,7 @@
 
 ### Documentation
 - Doc sweep: `PROJ-LAYOUT.md` (+summary) now lists `AGENT.md`, `AGENTS.md`, `CLAUDE.md` and `docs/THREAT-MODEL.md`; `PROJ-ARCH.md` (+summary) line counts aligned to source (`~1557` / `~435`) and cross-links the threat model; fixed the `team[:role]` typo in `PROJ-SCHEMA.md` §3; created `THREAT-MODEL.md` (+summary) — 12-entry register `T-001`…`T-012`, no Critical.
+- Seeded the first `.meta/pointers.yaml` — 10 full-UUID file pointers on README, the five `PROJ-*` docs, `THREAT-MODEL.md`, `CLAUDE.md`, `AGENT.md`, and `howto/avoid-submodule-conversion.md` (#3).
 
 ## [Unreleased]
 
