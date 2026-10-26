@@ -84,7 +84,7 @@ Both CLIs use a hand-rolled `while/case` parser; `--help` extracts the header co
 ### Groups string (`--groups` / `GH_NEW_REPO_GROUPS*`)
 
 ```
-"<team>[::<role>]"(, ...) — comma-separated; each entry "team[:role]"
+"<team>[:<role>]"(, ...) — comma-separated; each entry "team[:role]"
 ```
 
 - `role` ∈ `pull | push | admin | maintain | triage`; invalid role ⇒ entry skipped with warning.

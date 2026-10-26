@@ -15,10 +15,14 @@ make-repo/
 │   ├── PROJ-LAYOUT*(.summary)  # this map
 │   ├── PROJ-HOWTO*(.summary)   # task guides
 │   ├── PROJ-FAQ*(.summary)     # FAQ
+│   ├── THREAT-MODEL*(.summary) # attack surface, trust boundaries, risk register
 │   └── howto/
 │       └── avoid-submodule-conversion.md
 ├── .gitignore
+├── AGENT.md                    # agent guidance (AGENTS.md sibling)
+├── AGENTS.md
 ├── CHANGELOG.md
+├── CLAUDE.md                   # agent guidance (Claude Code)
 ├── Makefile                    # install → ~/.local/bin; test → run.sh
 └── README.md
 ```

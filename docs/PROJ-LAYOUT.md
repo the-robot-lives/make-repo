@@ -10,8 +10,8 @@ Plain tree: [`PROJ-LAYOUT.summary.md`](PROJ-LAYOUT.summary.md). Arch: [`PROJ-ARC
 ```
 make-repo/
 ├── bin/                            # CLIs installed to ~/.local/bin
-│   ├── make-repo                   #   Create/edit GitHub repos (~1560 lines bash)
-│   └── fork-repo                   #   Fork + rewire origin/upstream (~432 lines bash)
+│   ├── make-repo                   #   Create/edit GitHub repos (~1557 lines bash)
+│   └── fork-repo                   #   Fork + rewire origin/upstream (~435 lines bash)
 ├── tests/
 │   └── run.sh                      #   Isolated fake-gh integration suite
 ├── docs/
@@ -20,10 +20,14 @@ make-repo/
 │   ├── PROJ-LAYOUT.md(+.summary)   #   This file + tree-only companion
 │   ├── PROJ-HOWTO.md(+.summary)    #   Task guides (install, create, fork, edit)
 │   ├── PROJ-FAQ.md(+.summary)      #   Common questions
+│   ├── THREAT-MODEL.md(+.summary)  #   Attack surface, trust boundaries, risk register
 │   └── howto/
 │       └── avoid-submodule-conversion.md  # Parent integration: none/subtree/submodule
-├── .gitignore                      # Editor swap, .env, .envrc.local
+├── .gitignore                      # Editor swap, .env, .envrc.local, .claude/worktrees/
+├── AGENT.md                        # Agent guidance (Codex/Grok/Cursor; AGENTS.md sibling)
+├── AGENTS.md                       # Same policy as AGENT.md for AGENTS.md tooling
 ├── CHANGELOG.md                    # Package changelog
+├── CLAUDE.md                       # Agent guidance for Claude Code (worktree convention, PR policy)
 ├── Makefile                        # install → ~/.local/bin; test → tests/run.sh; compile no-op
 └── README.md                       # Start here — flags, env vars, examples
 ```
@@ -36,6 +40,8 @@ make-repo/
 | `bin/fork-repo` | Fork current clone or `org/repo` slug; local mode rewires remotes; slug mode optional `--clone` |
 | `tests/run.sh` | Temp parent/child repos + fake `gh`; covers none/subtree/submodule, `--origin` add/swap/attach/worktree/submodule, dry-run, headless, flag conflicts |
 | `Makefile` | `make install` (symlink-aware copy of both bins); `make test` runs suite; `compile` is no-op |
+| `docs/THREAT-MODEL.md` | Attack surface, trust boundaries, vulnerability register (`T-001`…) |
+| `CLAUDE.md` / `AGENT.md` / `AGENTS.md` | Agent guidance for Claude Code and the Codex/Grok/Cursor harness family; same policy, worktrees + `develop`-targeted PRs |
 | `docs/howto/avoid-submodule-conversion.md` | When/how to choose parent integration after create |
 
 ## Setup
