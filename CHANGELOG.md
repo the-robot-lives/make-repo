@@ -1,5 +1,9 @@
 # Changelog — utilities/shell/make-repo
 
+## 2026-10-28
+
+- docs: add AGENT-README.md (agent orientation)
+
 ## 2026-10-26
 
 ### Documentation
